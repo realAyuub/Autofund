@@ -44,8 +44,23 @@
     const fmtDKK = n => new Intl.NumberFormat("da-DK").format(Math.round(n)) + " kr.";
     const C = {bg:"#07090f",surface:"#0d1117",border:"#161b22",border2:"#21262d",gold:"#e3b96a",goldDim:"#e3b96a18",goldBorder:"#e3b96a44",text:"#e6edf3",muted:"#8b949e",dim:"#30363d",green:"#3fb950",red:"#f85149",teal:"#58a6ff"};
 
-    // REPLACE THIS WITH YOUR MISTRAL API KEY
-    const MISTRAL_API_KEY = "s";
+   async function fetchOneCar(profile) {
+  const res = await fetch("/api/mistral", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile }),
+  });
+
+  if (!res.ok) throw new Error("API fejl " + res.status);
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  const s = text.indexOf("{");
+  const e = text.lastIndexOf("}");
+  if (s === -1 || e === -1) throw new Error("Intet JSON");
+  const parsed = JSON.parse(text.slice(s, e + 1));
+  if (!parsed.brand) throw new Error("Mangler brand");
+  return parsed;
+}
 
     const SYSTEM_ONE = `Du er Danmarks bedste uafhængige bilrådgiver. Du kender alle bilmodeller i Danmark.
 Returner KUN ét JSON-objekt for ÉN bilanbefaling. Ingen tekst før/efter, ingen backticks.
