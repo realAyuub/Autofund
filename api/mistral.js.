@@ -1,21 +1,8 @@
-const SYSTEM_ONE = `Du er Danmarks bedste uafhængige bilrådgiver. Du kender alle bilmodeller i Danmark.
-Returner KUN ét JSON-objekt for ÉN bilanbefaling. Ingen tekst før/efter, ingen backticks.
-{
-  "brand": "Toyota","model": "RAV4","variant": "2.5 Hybrid Active","year_range": "2020-2023",
-  "short_why": ["Præcis 3 korte punkter","Maks 8 ord per punkt","Direkte og konkrete"],
-  "long_why": "2-3 sætninger der uddyber valget specifikt for denne familie.",
-  "price_new_dkk": 450000,"price_used_dkk": 310000,"fuel_type": "Hybrid","fuel_cost_monthly": 850,
-  "resale": {"y1":285000,"y2":265000,"y3":248000,"y4":232000,"y5":218000,"y6":205000,"y7":193000,"y8":182000},
-  "pros": ["Meget lavt brændstofforbrug","Exceptionel pålidelig","God familieplads"],
-  "cons": ["Ikke billigst i klassen","Lidt kedelig at køre"],
-  "safety_rating": 5,"reliability": "Meget høj",
-  "bilbasen_brand_slug": "toyota","bilbasen_model_slug": "rav4"
-}
-short_why: præcis 3 strings. Resale: realistiske danske priser. Svar KUN med JSON.`;
+const SYSTEM_ONE = `Du er Danmarks bedste uafhængige bilrådgiver...`;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Kun POST er tilladt" });
+    return res.status(405).json({ error: "Kun POST" });
   }
 
   const { profile } = req.body;
@@ -25,7 +12,7 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "Server mangler API-nøgle" });
+    return res.status(500).json({ error: "Mangler API key" });
   }
 
   try {
