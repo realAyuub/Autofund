@@ -1,19 +1,13 @@
-const SYSTEM_ONE = `Du er Danmarks bedste uafhængige bilrådgiver...`;
+const SYSTEM_ONE = `Du er Danmarks bedste uafhængige bilrådgiver...`; // brug din prompt
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Kun POST" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Kun POST" });
 
-  const { profile } = req.body;
-  if (!profile) {
-    return res.status(400).json({ error: "Manglende profile" });
-  }
+  const { profile } = req.body || {};
+  if (!profile) return res.status(400).json({ error: "Manglende profile" });
 
   const apiKey = process.env.MISTRAL_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "Mangler API key" });
-  }
+  if (!apiKey) return res.status(500).json({ error: "Mangler server-API-nøgle" });
 
   try {
     const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
@@ -33,8 +27,17 @@ export default async function handler(req, res) {
       }),
     });
 
-    const data = await response.json();
-    if (!response.ok) {
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) { /* fallback to raw */ data = { raw: text }; }
+
+    if (!response.ok) return res.status(response.status).json({ error: "Mistral error", details: data });
+
+    return res.status(200).json(data);
+  } catch (err) {
+    return res.status(500).json({ error: "Serverfejl", message: err.message });
+  }
+}    if (!response.ok) {
       return res.status(response.status).json(data);
     }
 
