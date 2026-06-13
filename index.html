@@ -46,21 +46,6 @@
     const fmtDKK = n => new Intl.NumberFormat("da-DK").format(Math.round(n)) + " kr.";
     const C = {bg:"#07090f",surface:"#0d1117",border:"#161b22",border2:"#21262d",gold:"#e3b96a",goldDim:"#e3b96a18",goldBorder:"#e3b96a44",text:"#e6edf3",muted:"#8b949e",dim:"#30363d",green:"#3fb950",red:"#f85149",teal:"#58a6ff"};
 
-    const SYSTEM_ONE = `Du er Danmarks bedste uafhængige bilrådgiver. Du kender alle bilmodeller i Danmark.
-Returner KUN ét JSON-objekt for ÉN bilanbefaling. Ingen tekst før/efter, ingen backticks.
-{
-  "brand": "Toyota","model": "RAV4","variant": "2.5 Hybrid Active","year_range": "2020-2023",
-  "short_why": ["Præcis 3 korte punkter","Maks 8 ord per punkt","Direkte og konkrete"],
-  "long_why": "2-3 sætninger der uddyber valget specifikt for denne familie.",
-  "price_new_dkk": 450000,"price_used_dkk": 310000,"fuel_type": "Hybrid","fuel_cost_monthly": 850,
-  "resale": {"y1":285000,"y2":265000,"y3":248000,"y4":232000,"y5":218000,"y6":205000,"y7":193000,"y8":182000},
-  "pros": ["Meget lavt brændstofforbrug","Exceptionel pålidelig","God familieplads"],
-  "cons": ["Ikke billigst i klassen","Lidt kedelig at køre"],
-  "safety_rating": 5,"reliability": "Meget høj",
-  "bilbasen_brand_slug": "toyota","bilbasen_model_slug": "rav4"
-}
-short_why: præcis 3 strings. Resale: realistiske danske priser. Svar KUN med JSON.`;
-
     function buildProfile(f, rank, exclude) {
       return `Familie: ${f.adults} voksne, ${f.children} børn${f.childAges?` (${f.childAges})`:""}
 Budget: ${f.budgetType==="kontant"?fmtDKK(f.budget)+" kontant":fmtDKK(f.monthly)+"/md"}
@@ -76,13 +61,35 @@ ${rank===2?"Giv et ALTERNATIVT forslag — anden biltype end det mest oplagte.":
 Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
     }
 
+    function buildBilbasenUrl(form, car) {
+      const p = new URLSearchParams();
+      if (form.budget) p.set("PriceTo", form.budget);
+      const yf = form.yearMin||(car?.year_range?car.year_range.split("-")[0]:"");
+      if (yf) p.set("YearFrom", yf);
+      if (form.kmMax) p.set("MileageTo", form.kmMax);
+      (form.fuels?.length?form.fuels:(car?.fuel_type?[car.fuel_type]:[])).forEach(f=>{if(BB_FUEL[f])p.append("fuel",BB_FUEL[f])});
+      (form.bodies||[]).forEach(b=>{if(BB_BODY[b])p.append("BodyType",BB_BODY[b])});
+      return `https://www.bilbasen.dk/brugt/bil?${p.toString()}`;
+    }
+
+    function buildBilbasenModelUrl(form, car) {
+      const bs = car.bilbasen_brand_slug||BB_BRAND_SLUG[car.brand]||car.brand.toLowerCase().replace(/\s+/g,"-");
+      const ms = car.bilbasen_model_slug||car.model.toLowerCase().replace(/\s+/g,"-");
+      const p = new URLSearchParams();
+      if (form.budget) p.set("PriceTo", form.budget);
+      const yf = form.yearMin||(car.year_range?car.year_range.split("-")[0]:"");
+      if (yf) p.set("YearFrom", yf);
+      if (form.kmMax) p.set("MileageTo", form.kmMax);
+      (form.fuels?.length?form.fuels:(car.fuel_type?[car.fuel_type]:[])).forEach(f=>{if(BB_FUEL[f])p.append("fuel",BB_FUEL[f])});
+      return `https://www.bilbasen.dk/brugt/bil/${bs}/${ms}?${p.toString()}`;
+    }
+
     async function fetchOneCar(profile) {
       const res = await fetch("/api/mistral", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile }),
       });
-
       if (!res.ok) throw new Error("API fejl " + res.status);
       const data = await res.json();
       const text = data.choices?.[0]?.message?.content || "";
@@ -154,6 +161,138 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
       </div>;
     }
 
+    function Sparkline({resale,price}) {
+      const all=[price,resale.y1,resale.y2,resale.y3,resale.y4,resale.y5,resale.y6,resale.y7,resale.y8];
+      const mn=Math.min(...all)*0.92,mx=Math.max(...all),rng=mx-mn,W=300,H=56;
+      const x=i=>(i/(all.length-1))*W, y=v=>H-((v-mn)/rng)*H;
+      const pts=all.map((v,i)=>`${x(i)},${y(v)}`).join(" ");
+      return <svg width="100%" viewBox={`0 0 ${W} ${H+20}`} style={{overflow:"visible"}}>
+        <defs><linearGradient id="sg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity="0.25"/><stop offset="100%" stopColor={C.gold} stopOpacity="0"/></linearGradient></defs>
+        <path d={`M ${pts.split(" ").join(" L ")} L ${W} ${H+8} L 0 ${H+8} Z`} fill="url(#sg2)"/>
+        <polyline points={pts} fill="none" stroke={C.gold} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+        {all.map((v,i)=>i%2===0&&<g key={i}><circle cx={x(i)} cy={y(v)} r="3" fill={C.gold}/><text x={x(i)} y={H+16} textAnchor="middle" fill={C.muted} fontSize="9">{i===0?"Nu":`år ${i}`}</text></g>)}
+      </svg>;
+    }
+
+    function DisclaimerBox() {
+      const [open,setOpen]=useState(false);
+      return <div style={{background:C.surface,border:`1px solid ${C.border2}`,borderRadius:10,overflow:"hidden",marginTop:24}}>
+        <button onClick={()=>setOpen(!open)} style={{width:"100%",background:"none",border:"none",padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+          <span style={{color:C.muted,fontSize:12,display:"flex",alignItems:"center",gap:6}}><span style={{color:C.gold}}>ℹ</span> Hvordan beregnes tallene her?</span>
+          <span style={{color:C.dim,fontSize:10,transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}>▼</span>
+        </button>
+        {open&&<div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.border}`}}>
+          <div style={{color:C.muted,fontSize:12,lineHeight:1.8}}>
+            <p style={{marginBottom:8,color:C.text,fontWeight:600}}>Estimater — ikke garantier</p>
+            <p style={{marginBottom:8}}>Alle priser og gensalgsværdier er <strong style={{color:C.gold}}>estimater</strong> baseret på historiske markedsdata. De bør ikke bruges som grundlag for finansielle beslutninger.</p>
+            <p style={{marginBottom:8}}><strong style={{color:C.gold}}>Sikkerhedsvurdering</strong> er baseret på Euro NCAP-testresultater. Se <a href="https://www.euroncap.com" target="_blank" rel="noopener noreferrer" style={{color:C.teal}}>euroncap.com</a>.</p>
+            <p><strong style={{color:C.gold}}>Pålidelighed</strong> er baseret på ADAC Pannenstatistik og TÜV-rapporter.</p>
+          </div>
+        </div>}
+      </div>;
+    }
+
+    function ServicesSection() {
+      return <div style={{marginTop:36,borderTop:`1px solid ${C.border}`,paddingTop:28}}>
+        <div style={{color:C.muted,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:16}}>Har du brug for mere hjælp?</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {[
+            {icon:"🎯",title:"Personlig rådgivning",price:"499 kr.",desc:"En bilekspert gennemgår dine behov og finder de 5 bedste konkrete annoncer til dig.",tag:"Populær"},
+            {icon:"🤝",title:"Forhandling på dine vegne",price:"999 kr.",desc:"Vi forhandler den bedste pris for dig. Gennemsnitlig besparelse: 8.000–15.000 kr.",tag:"Mest værdi"},
+            {icon:"✅",title:"Komplet pakke",price:"1.299 kr.",desc:"Rådgivning + forhandling + gennemgang af synsrapport og servicehistorik.",tag:null},
+          ].map(s=><div key={s.title} style={{background:C.surface,border:`1px solid ${C.border2}`,borderRadius:10,padding:"14px 16px",display:"flex",gap:14,alignItems:"flex-start"}}>
+            <span style={{fontSize:20,flexShrink:0}}>{s.icon}</span>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <span style={{color:C.text,fontSize:14,fontWeight:700}}>{s.title}</span>
+                {s.tag&&<span style={{background:C.goldDim,border:`1px solid ${C.goldBorder}`,color:C.gold,fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20}}>{s.tag}</span>}
+              </div>
+              <p style={{color:C.muted,fontSize:12,lineHeight:1.6,marginBottom:8}}>{s.desc}</p>
+              <button style={{background:C.gold,color:"#000",border:"none",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Bestil — {s.price}</button>
+            </div>
+          </div>)}
+        </div>
+      </div>;
+    }
+
+    function CarCard({car,form,onReject,isAlt,loading}) {
+      const [expanded,setExpanded]=useState(false);
+      if(loading) return <div style={{background:C.surface,border:`1px solid ${C.border2}`,borderRadius:14,padding:"32px 24px",textAlign:"center"}}>
+        <div style={{display:"inline-block",width:22,height:22,border:`2px solid ${C.gold}33`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+        <div style={{color:C.muted,fontSize:13,marginTop:12}}>Finder {isAlt?"alternativt forslag":"bedste match"}...</div>
+      </div>;
+      if(!car) return null;
+      const loss8=car.price_used_dkk-car.resale.y8;
+      const monthlyLoss=loss8/96;
+      return <div style={{background:C.surface,border:`1px solid ${isAlt?C.border2:C.goldBorder}`,borderRadius:14,overflow:"hidden",position:"relative",boxShadow:isAlt?"none":`0 0 40px ${C.goldDim}`,animation:"fadeUp .35s ease"}}>
+        {onReject&&<button onClick={onReject} title="Få et andet forslag" style={{position:"absolute",top:12,right:12,zIndex:10,width:26,height:26,borderRadius:"50%",border:`1px solid ${C.border2}`,background:C.bg,color:C.muted,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}} onMouseEnter={e=>{e.currentTarget.style.borderColor=C.red;e.currentTarget.style.color=C.red;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.muted;}}>✕</button>}
+        <div style={{background:isAlt?C.border:C.goldDim,padding:"5px 16px",borderBottom:`1px solid ${isAlt?C.border2:C.goldBorder}`}}>
+          <span style={{color:isAlt?C.muted:C.gold,fontSize:10,fontWeight:700,letterSpacing:1}}>{isAlt?"ALTERNATIVT FORSLAG":"🏆 BEDSTE MATCH"}</span>
+        </div>
+        <div style={{padding:"18px 18px 0"}}>
+          <div style={{marginBottom:14}}>
+            <div style={{fontFamily:"'Sora',sans-serif",fontSize:21,fontWeight:800,color:C.text,lineHeight:1.1}}>{car.brand} {car.model}</div>
+            <div style={{color:C.muted,fontSize:13,marginTop:2}}>{car.variant} · {car.year_range}</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:16,marginTop:10}}>
+              <div><div style={{color:C.dim,fontSize:9,textTransform:"uppercase",letterSpacing:.5}}>Brugt ca.</div><div style={{color:C.gold,fontSize:19,fontWeight:800}}>{fmtDKK(car.price_used_dkk)}</div></div>
+              <div><div style={{color:C.dim,fontSize:9,textTransform:"uppercase",letterSpacing:.5}}>Ny pris</div><div style={{color:C.muted,fontSize:14,fontWeight:600}}>{fmtDKK(car.price_new_dkk)}</div></div>
+              <div><div style={{color:C.dim,fontSize:9,textTransform:"uppercase",letterSpacing:.5}}>Brændstof/md.*</div><div style={{color:C.teal,fontSize:14,fontWeight:600}}>{fmtDKK(car.fuel_cost_monthly)}</div></div>
+            </div>
+          </div>
+          <div style={{background:C.bg,borderRadius:9,padding:"12px 14px",marginBottom:12}}>
+            <div style={{color:C.dim,fontSize:9,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Hvorfor denne bil?</div>
+            {(Array.isArray(car.short_why)?car.short_why:[car.short_why]).map((pt,i)=>(
+              <div key={i} style={{display:"flex",gap:7,marginBottom:i<2?6:0,alignItems:"flex-start"}}>
+                <span style={{color:C.gold,fontSize:11,marginTop:2,flexShrink:0}}>→</span>
+                <span style={{color:C.muted,fontSize:13,lineHeight:1.5}}>{pt}</span>
+              </div>
+            ))}
+            <button onClick={()=>setExpanded(!expanded)} style={{background:"none",border:"none",color:C.gold,fontSize:11,cursor:"pointer",marginTop:8,padding:0}}>{expanded?"▲ Skjul":"▼ Læs mere"}</button>
+            {expanded&&<p style={{color:C.text,fontSize:13,lineHeight:1.7,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.border}`}}>{car.long_why}</p>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+            <div style={{background:C.bg,borderRadius:9,padding:11}}>{car.pros.map((p,i)=><div key={i} style={{display:"flex",gap:6,marginBottom:i<car.pros.length-1?5:0}}><span style={{color:C.green,fontSize:10,marginTop:2}}>✓</span><span style={{color:C.muted,fontSize:12}}>{p}</span></div>)}</div>
+            <div style={{background:C.bg,borderRadius:9,padding:11}}>{car.cons.map((c,i)=><div key={i} style={{display:"flex",gap:6,marginBottom:i<car.cons.length-1?5:0}}><span style={{color:C.red,fontSize:10,marginTop:2}}>✗</span><span style={{color:C.muted,fontSize:12}}>{c}</span></div>)}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+            {[{l:"Sikkerhed",v:"⭐".repeat(car.safety_rating)},{l:"Pålidelighed",v:car.reliability},{l:"Tab over 8 år*",v:"−"+fmtDKK(loss8),red:true}].map(s=><div key={s.l} style={{background:C.bg,borderRadius:8,padding:"9px 11px"}}><div style={{color:C.dim,fontSize:9,textTransform:"uppercase",letterSpacing:.5,marginBottom:3}}>{s.l}</div><div style={{color:s.red?C.red:C.muted,fontSize:12,fontWeight:600}}>{s.v}</div></div>)}
+          </div>
+          <div style={{background:C.bg,borderRadius:9,padding:"12px 14px",marginBottom:12}}>
+            <div style={{color:C.dim,fontSize:9,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Gensalgsværdi — 8 år*</div>
+            <Sparkline resale={car.resale} price={car.price_used_dkk}/>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}><span style={{color:C.dim,fontSize:10}}>Nu: {fmtDKK(car.price_used_dkk)}</span><span style={{color:C.dim,fontSize:10}}>År 8: {fmtDKK(car.resale.y8)}</span></div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:7,paddingBottom:18}}>
+            <a href={buildBilbasenModelUrl(form,car)} target="_blank" rel="noopener noreferrer" style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.gold,color:"#000",padding:"11px 15px",borderRadius:8,fontWeight:700,fontSize:13}}>
+              <span>🔍 Se {car.brand} {car.model} på Bilbasen</span><span>→</span>
+            </a>
+            <a href={buildBilbasenUrl(form,car)} target="_blank" rel="noopener noreferrer" style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"transparent",border:`1px solid ${C.border2}`,color:C.muted,padding:"9px 15px",borderRadius:8,fontSize:12}}>
+              <span>Alle {car.fuel_type}-biler i dit budget på Bilbasen</span><span>→</span>
+            </a>
+          </div>
+          <p style={{color:C.dim,fontSize:10,textAlign:"center",paddingBottom:14}}>* Estimater — ikke garantier</p>
+        </div>
+      </div>;
+    }
+
+    function Results({cards,loadingA,loadingB,form,onReject,onRefresh,summary}) {
+      return <div style={{animation:"fadeUp .4s ease"}}>
+        {summary&&<div style={{background:C.goldDim,border:`1px solid ${C.goldBorder}`,borderRadius:10,padding:"12px 16px",marginBottom:22}}>
+          <div style={{color:C.gold,fontSize:10,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>Din profil</div>
+          <p style={{color:C.muted,fontSize:13,lineHeight:1.6}}>{summary}</p>
+        </div>}
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <CarCard car={cards[0]} form={form} isAlt={false} loading={loadingA} onReject={!loadingA?()=>onReject(0):null}/>
+          <CarCard car={cards[1]} form={form} isAlt={true} loading={loadingB} onReject={!loadingB?()=>onReject(1):null}/>
+        </div>
+        <DisclaimerBox/>
+        <ServicesSection/>
+        <div style={{textAlign:"center",marginTop:28}}>
+          <button onClick={onRefresh} style={{background:"transparent",border:`1px solid ${C.border2}`,color:C.muted,padding:"9px 22px",borderRadius:8,fontSize:13,cursor:"pointer"}}>← Ret søgning</button>
+        </div>
+      </div>;
+    }
+
     function App() {
       const [step,setStep]=useState(0);
       const [form,setForm]=useState({adults:"2",children:"0",childAges:"",region:"",budgetType:"kontant",budget:"",monthly:"",yearMin:"",kmMax:"",dailyKm:"",driveType:"",extras:"",bodies:[],fuels:[],brands:[],excludeBrands:[],priorities:[],transmission:"",towbar:""});
@@ -187,7 +326,7 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
           setCards(c=>[pA.value,c[1]]);
           if(!summary) setSummary(`Baseret på jeres profil har vi fundet ${pA.value.brand} ${pA.value.model} som bedste match.`);
         } else {
-          setError("Kunne ikke hente anbefaling — tjek at API-nøglen er korrekt.");
+          setError("Kunne ikke hente anbefaling — prøv igen.");
         }
         setLoadingA(false);
         if(pB.status==="fulfilled") setCards(c=>[c[0],pB.value]);
@@ -210,7 +349,7 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
         if(idx===0) setLoadingA(false); else setLoadingB(false);
       }
 
-      const commonButton = {background:C.gold,color:"#000",border:"none",padding:"11px 26px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"};
+      const commonButton = {background:C.gold,color:"#000",border:"none",padding:"11px 26px",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"};
 
       return (
         <div style={{minHeight:"100vh",background:C.bg}}>
@@ -221,7 +360,7 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
             <span style={{marginLeft:"auto",color:C.dim,fontSize:11}}>Uafhængig rådgivning · Kun Danmark</span>
           </div>
           <div style={{maxWidth:600,margin:"0 auto",padding:"32px 18px 80px"}}>
-            <div style={{marginBottom:32}}>
+            {!showResults && <div style={{marginBottom:32}}>
               <div style={{display:"flex",alignItems:"center",marginBottom:8}}>
                 {STEPS.map((s,i)=><div key={s.id} style={{display:"flex",alignItems:"center",flex:i<STEPS.length-1?1:"none"}}>
                   <div style={{width:30,height:30,borderRadius:"50%",background:i<step?C.gold:"transparent",border:`2px solid ${i<step?C.gold:i===step?C.gold:C.border2}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:i<step?11:13,color:i<step?"#000":i===step?C.gold:C.dim}}>{i<step?"✓":s.icon}</div>
@@ -231,9 +370,9 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
               <div style={{display:"flex",justifyContent:"space-between"}}>
                 {STEPS.map((s,i)=><div key={s.id} style={{color:i===step?C.gold:i<step?C.muted:C.dim,fontSize:10,fontWeight:i===step?700:400,textAlign:"center",flex:1}}>{s.label}</div>)}
               </div>
-            </div>
+            </div>}
 
-            {step===0 && <div style={{animation:"fadeUp .3s ease"}}>
+            {!showResults && step===0 && <div style={{animation:"fadeUp .3s ease"}}>
               <h2 style={{fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:C.text,marginBottom:5}}>Fortæl om familien</h2>
               <p style={{color:C.muted,fontSize:13,marginBottom:26}}>Hvem skal bruge bilen?</p>
               <Field label="Antal voksne"><SingleChips options={["1","2","3","4+"]} value={form.adults} onChange={v=>set("adults")(v)}/></Field>
@@ -242,7 +381,7 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
               <Field label="Geografisk område"><SingleDropdown value={form.region} onChange={v=>set("region")(v)} options={REGIONS} placeholder="Vælg region"/></Field>
             </div>}
 
-            {step===1 && <div style={{animation:"fadeUp .3s ease"}}>
+            {!showResults && step===1 && <div style={{animation:"fadeUp .3s ease"}}>
               <h2 style={{fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:C.text,marginBottom:5}}>Økonomi</h2>
               <p style={{color:C.muted,fontSize:13,marginBottom:26}}>Hvad er jeres budget?</p>
               <Field label="Betalingsform"><SingleChips options={["kontant","månedlig"]} value={form.budgetType} onChange={v=>set("budgetType")(v)}/></Field>
@@ -255,7 +394,7 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
               </div>
             </div>}
 
-            {step===2 && <div style={{animation:"fadeUp .3s ease"}}>
+            {!showResults && step===2 && <div style={{animation:"fadeUp .3s ease"}}>
               <h2 style={{fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:C.text,marginBottom:5}}>Daglig brug</h2>
               <p style={{color:C.muted,fontSize:13,marginBottom:26}}>Hvordan bruges bilen til hverdag?</p>
               <Field label="Daglig km-forbrug"><NumInput value={form.dailyKm} onChange={v=>set("dailyKm")(v)} placeholder="F.eks. 40" suffix="km/dag"/></Field>
@@ -263,7 +402,7 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
               <Field label="Særlige behov" hint="valgfrit"><TxtInput value={form.extras} onChange={v=>set("extras")(v)} placeholder="Anhænger, barnevogn, hunde..."/></Field>
             </div>}
 
-            {step===3 && <div style={{animation:"fadeUp .3s ease"}}>
+            {!showResults && step===3 && <div style={{animation:"fadeUp .3s ease"}}>
               <h2 style={{fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:C.text,marginBottom:5}}>Biltype</h2>
               <p style={{color:C.muted,fontSize:13,marginBottom:26}}>Hvad forestiller I jer?</p>
               <Field label="Karosseri" hint="vælg gerne flere"><MultiChips options={BODY_TYPES} value={form.bodies} onChange={v=>set("bodies")(v)}/></Field>
@@ -272,7 +411,7 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
               <Field label="Uønskede mærker"><MultiDropdown value={form.excludeBrands} onChange={v=>set("excludeBrands")(v)} options={BRANDS} placeholder="Ingen uønskede mærker"/></Field>
             </div>}
 
-            {step===4 && <div style={{animation:"fadeUp .3s ease"}}>
+            {!showResults && step===4 && <div style={{animation:"fadeUp .3s ease"}}>
               <h2 style={{fontFamily:"'Sora',sans-serif",fontSize:20,fontWeight:800,color:C.text,marginBottom:5}}>Hvad er vigtigst?</h2>
               <p style={{color:C.muted,fontSize:13,marginBottom:26}}>Vælg hvad der betyder mest for jer.</p>
               <Field label="Prioriteter" hint="vælg gerne flere"><MultiChips options={PRIORITIES} value={form.priorities} onChange={v=>set("priorities")(v)}/></Field>
@@ -280,12 +419,19 @@ Undgå: ${(exclude||[]).join(", ")||"ingen"}`;
               <Field label="Anhængerled?" hint="valgfrit"><SingleChips options={["Ja, vigtigt","Rart at have","Nej tak"]} value={form.towbar} onChange={v=>set("towbar")(v)}/></Field>
             </div>}
 
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:32}}>
+            {showResults && <Results
+              cards={cards} loadingA={loadingA} loadingB={loadingB}
+              form={form} summary={summary}
+              onReject={handleReject}
+              onRefresh={()=>{setShowResults(false);setCards([null,null]);setSummary("");setExcluded([[],[]]);setStep(4);}}
+            />}
+
+            {!showResults && <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:32}}>
               {step>0 ? <button onClick={()=>setStep(s=>s-1)} style={{background:"transparent",border:`1px solid ${C.border2}`,color:C.muted,padding:"10px 20px",borderRadius:8,cursor:"pointer"}}>← Tilbage</button> : <div/>}
               {step<4
                 ? <button onClick={()=>setStep(s=>s+1)} disabled={!canNext(step)} style={{...commonButton,background:canNext(step)?C.gold:C.border,color:canNext(step)?"#000":C.dim,cursor:canNext(step)?"pointer":"default"}}>Næste →</button>
                 : <button onClick={()=>runSearch([[],[]])} style={commonButton}>Find vores bil ✨</button>}
-            </div>
+            </div>}
 
             {error && <p style={{color:C.red,fontSize:12,textAlign:"center",marginTop:14}}>{error}</p>}
           </div>
