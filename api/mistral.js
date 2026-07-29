@@ -49,7 +49,8 @@ Returner KUN ét JSON-objekt for ÉN bilanbefaling. Ingen tekst før/efter, inge
   "bilbasen_model_slug": "octavia",
   "bilbasen_search_term": "vRS",
   "imagin_make": "skoda",
-  "imagin_model_family": "octavia"
+  "imagin_model_family": "octavia",
+  "wikipedia_title": "Škoda Octavia"
 }
 short_why: præcis 3 strings. resale: realistiske danske priser i kroner.
 
@@ -61,6 +62,11 @@ modellen, så returner en tom liste frem for at finde på navne.
 
 imagin_make/imagin_model_family: producent og modelfamilie i små bogstaver uden
 årstal eller variant (f.eks. "mercedes-benz" og "c-class").
+
+wikipedia_title: titlen på modellens artikel på ENGELSK Wikipedia, så vi kan
+finde et billede. Brug det internationale modelnavn, ikke det danske — altså
+"BMW 1 Series", ikke "BMW 1-serie", og "Mercedes-Benz C-Class", ikke
+"Mercedes C-Klasse".
 
 Svar KUN med JSON.`;
 

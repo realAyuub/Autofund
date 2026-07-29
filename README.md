@@ -63,18 +63,26 @@ trin hvis et led ikke svarer:
 
 1. **IMAGIN.studio** — studierenderinger hvor alle biler vises fra samme
    vinkel i samme lys. Kræver en kundenøgle i `IMAGIN_CUSTOMER`.
-2. **Wikipedia** — hovedbilledet fra bilens artikel. Gratis, ingen nøgle,
-   ingen oprettelse. Bilartiklers hovedbillede er næsten altid et udvendigt
-   dagslysfoto skråt forfra, så billederne bliver rimeligt ensartede.
+2. **Wikipedia** — hovedbilledet fra bilens artikel, fundet med Wikipedias
+   søgning frem for et præcist titelopslag. Danske modelnavne rammer sjældent
+   en artikeltitel: "BMW 1-serie" hedder "BMW 1 Series" på engelsk. AI'en
+   leverer desuden et `wikipedia_title` som første gæt. Gratis, ingen nøgle.
 3. **Tegning** — en silhuet i tre karosseriformer, så en stationcar ikke
    tegnes som en SUV.
 
 ## Bilbasen-søgninger
 
-Filtrene virker på den flade form, `/brugt/bil?…`. Mærke og model sendes som
-fritekst i `free`, fordi det er den eneste konstruktion vi har kunnet bekræfte
-giver rigtige resultater. Mærke-stien (`/brugt/bil/skoda/octavia`) bruges kun
-til knappen "uden filtre", hvor der ikke hænger parametre på.
+Søgningen bygges i den rækkefølge, der snævrer mest ind først:
+
+1. **mærke og model** som sti — `/brugt/bil/vw/golf`
+2. **årgang** — `yearfrom` / `yearto`
+3. **prisklasse** — `pricefrom` / `priceto`
+4. **brændstof og km** — `fuel` / `mileageto`
+5. **fritekst til sidst** — `free`, kun til varianter som `vRS`
+
+Sti og parametre virker sammen. Fritekst bruges bevidst ikke til mærke og
+model — det er stiens opgave, og dobbeltbinding er den hurtigste vej til nul
+resultater.
 
 Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*. Er
 estimatet nogle procent ved siden af, og båndet smalt, giver søgningen nul
