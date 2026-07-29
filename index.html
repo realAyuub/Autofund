@@ -31,10 +31,18 @@
     /* ─────────────────────────────────────────────────────────────
        KONFIGURATION — ret disse værdier ét sted
        ───────────────────────────────────────────────────────────── */
-    const CONTACT_EMAIL = "ayuubmume@hotmail.com";   // modtager af kontakt + forespørgsler
+    const CONTACT_EMAIL = "Bilfinder@support.dk";     // modtager af kontakt + forespørgsler
     const COMPANY_NAME  = "BilFinder";
     const BILBASEN_BASE = "https://www.bilbasen.dk/brugt/bil";
     const FDM_SEARCH    = q => `https://www.fdm.dk/soeg?query=${encodeURIComponent(q)}`;
+
+    /* Bilbilleder. IMAGIN.studio leverer studierenderinger, hvor ALLE biler er
+       fotograferet fra samme vinkel, i samme lys og på samme baggrund — derfor
+       ser de to forslag ens ud i stedet for "en forfra og en bagfra".
+       De kræver en kundenøgle til hvert kald (opret gratis på imaginstudio.com).
+       Er feltet tomt, viser vi i stedet en ensartet silhuet — aldrig et skævt foto. */
+    const IMAGIN_CUSTOMER = "";      // ← indsæt din kundenøgle her
+    const CAR_IMAGE_ANGLE = "01";    // samme vinkel for alle biler. 01 = skrå forfra
 
     /* ── Mærker: hele det danske marked, søgbart ── */
     const BRANDS = ["Abarth","Aiways","Alfa Romeo","Alpine","Aston Martin","Audi","Bentley","BMW","BYD","Cadillac","Chevrolet","Chrysler","Citroën","Cupra","Dacia","Daihatsu","Dodge","DS Automobiles","Ferrari","Fiat","Ford","Genesis","GWM","Honda","Hongqi","Hyundai","Isuzu","Jaecoo","Jaguar","Jeep","Kia","Lada","Lamborghini","Lancia","Land Rover","Leapmotor","Lexus","Lotus","Maserati","Maxus","Mazda","McLaren","Mercedes-Benz","MG","Mini","Mitsubishi","NIO","Nissan","Omoda","Opel","Peugeot","Polestar","Porsche","Renault","Rolls-Royce","Rover","Saab","Seat","Seres","Skoda","Skywell","Smart","SsangYong","Subaru","Suzuki","Tesla","Toyota","VinFast","Volkswagen","Volvo","Xpeng","Zeekr"];
@@ -54,16 +62,21 @@
       {id:"results",label:"Resultater", icon:"✨",     title:"Resultater",          sub:""},
     ];
 
-    /* Bilbasen-koder. Bemærk: Bilbasens URL-parametre kan ændre sig — ret her hvis de gør. */
+    /* Bilbasen-koder, verificeret mod rigtige Bilbasen-URL'er:
+       karosseri er navne (cartypes=MPV), brændstof er tal (fuel=2 = diesel).
+       Ændrer Bilbasen deres parametre, rettes det her. */
     const BB_FUEL = {Benzin:"1",Diesel:"2",Hybrid:"3","Plugin-hybrid":"4",El:"5"};
-    const BB_BODY = {Hatchback:"1",Sedan:"2",Stationcar:"4",Cabriolet:"5",Pickup:"7",MPV:"8",Coupe:"9",SUV:"16"};
-    const SLUG_OVERRIDES = {"Mercedes-Benz":"mercedes-benz","DS Automobiles":"ds","Land Rover":"land-rover","Alfa Romeo":"alfa-romeo","Aston Martin":"aston-martin","Rolls-Royce":"rolls-royce","VinFast":"vinfast","MG":"mg","BMW":"bmw","BYD":"byd","GWM":"gwm","NIO":"nio","DS":"ds"};
+    const BB_BODY = {Hatchback:"Hatchback",Sedan:"Sedan",Stationcar:"Stationcar",Cabriolet:"Cabriolet",Pickup:"Pickup",MPV:"MPV",Coupe:"Coupe",SUV:"SUV"};
+    /* Bilbasen bruger korte navne i mærke-stien (/brugt/bil/vw, ikke /volkswagen)
+       med bindestreg i mærker (/alfa-romeo/giulia) og underscore i modeller (/renault/megane_iv) */
+    const SLUG_OVERRIDES = {"Volkswagen":"vw","Mercedes-Benz":"mercedes","DS Automobiles":"ds","Land Rover":"land-rover","Alfa Romeo":"alfa-romeo","Aston Martin":"aston-martin","Rolls-Royce":"rolls-royce","VinFast":"vinfast","MG":"mg","BMW":"bmw","BYD":"byd","GWM":"gwm","NIO":"nio","DS":"ds"};
 
-    const slugify = s => (s||"").toString().trim().toLowerCase()
+    const slugify = (s, sep="_") => (s||"").toString().trim().toLowerCase()
       .replace(/æ/g,"ae").replace(/ø/g,"oe").replace(/å/g,"aa")
       .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-      .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-    const brandSlug = b => SLUG_OVERRIDES[b] || slugify(b);
+      .replace(/[^a-z0-9]+/g,sep)
+      .replace(sep==="_"?/^_+|_+$/g:/^-+|-+$/g,"");
+    const brandSlug = b => SLUG_OVERRIDES[b] || slugify(b,"-");
 
     const fmtDKK = n => (n===null||n===undefined||isNaN(n)) ? "–" : new Intl.NumberFormat("da-DK").format(Math.round(n)) + " kr.";
     const num = v => { const n = parseInt(String(v).replace(/\D/g,""),10); return isNaN(n)?null:n; };
@@ -163,36 +176,56 @@
       if (userMin) from = Math.max(from||userMin, userMin);
       return [from, to];
     }
-    /* Præcis søgning: mærke + model i stien, årgang/pris/km/brændstof/variant som filtre */
+    /* Bilbasen-parametre bekræftet mod rigtige URL'er:
+       pricefrom/priceto, yearfrom/yearto, mileageto, fuel (tal), cartypes (navn),
+       hpfrom/hpto, free (fritekst). includeleasing og
+       includewithoutvehicleregistrationtax slås FRA, fordi leasingannoncer viser
+       månedsydelser og afgiftsfrie biler viser priser uden registreringsafgift —
+       begge dele ødelægger en søgning på prisinterval. */
+    function baseParams(form, car, priceLo, priceHi) {
+      const p = new URLSearchParams();
+      if (priceLo) p.set("pricefrom", priceLo);
+      if (priceHi) p.set("priceto", priceHi);
+      const [yf,yt] = yearBand(car||{}, form);
+      if (yf) p.set("yearfrom", yf);
+      if (yt) p.set("yearto", yt);
+      if (num(form.kmMax)) p.set("mileageto", num(form.kmMax));
+      if (num(form.minHp)) p.set("hpfrom", num(form.minHp));
+      p.set("includeleasing", "false");
+      p.set("includewithoutvehicleregistrationtax", "false");
+      return p;
+    }
+    /* Er modelnavnet ét ord, kan det stå i stien (/skoda/octavia).
+       Er det flere ord, er sti-formen usikker — så ryger modellen i fritekst i stedet. */
+    function modelPathAndText(car) {
+      const raw = car.bilbasen_model_slug || slugify(car.model);
+      const oneWord = raw && !raw.includes("_");
+      return { path: oneWord ? raw : "", text: oneWord ? "" : (car.model||"") };
+    }
+    /* Præcis søgning: mærke (+ model) i stien, resten som filtre */
     function buildBilbasenModelUrl(form, car, pct=5) {
       const bs = car.bilbasen_brand_slug || brandSlug(car.brand);
-      const ms = car.bilbasen_model_slug || slugify(car.model);
-      const p = new URLSearchParams();
+      const { path: ms, text: modelText } = modelPathAndText(car);
       const [lo,hi] = priceBand(car, form, pct);
-      if (lo) p.set("PriceFrom", lo);
-      if (hi) p.set("PriceTo", hi);
-      const [yf,yt] = yearBand(car, form);
-      if (yf) p.set("YearFrom", yf);
-      if (yt) p.set("YearTo", yt);
-      if (num(form.kmMax)) p.set("MileageTo", num(form.kmMax));
+      const p = baseParams(form, car, lo, hi);
       const fuels = (form.fuels||[]).length ? form.fuels : (car.fuel_type?[car.fuel_type]:[]);
       fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
-      const term = car.bilbasen_search_term || form.variantWish || "";
-      if (term) p.set("free", term);                     // fritekst: motor-/udstyrsvariant
-      return `${BILBASEN_BASE}/${bs}/${ms}?${p.toString()}`;
+      // Brugerens variantønske må kun bruges hvis bilen faktisk fås i den variant —
+      // ellers ender et "vRS"-ønske som fritekst på en Tesla og giver nul resultater.
+      const wish = form.variantWish && String(car.variant||"").toLowerCase().includes(form.variantWish.toLowerCase())
+        ? form.variantWish : "";
+      const term = [modelText, car.bilbasen_search_term || wish].filter(Boolean).join(" ").trim();
+      if (term) p.set("free", term);
+      return `${BILBASEN_BASE}/${bs}${ms?`/${ms}`:""}?${p.toString()}`;
     }
     /* Bredere søgning i samme klasse — stadig filtreret, ikke "alle biler" */
     function buildBilbasenBroadUrl(form, car) {
-      const p = new URLSearchParams();
-      const budget = num(form.budget) || (num(car?.price_used_dkk) ? Math.round(num(car.price_used_dkk)*1.1) : null);
-      if (budget) p.set("PriceTo", budget);
-      const [yf] = yearBand(car||{}, form);
-      if (yf) p.set("YearFrom", yf);
-      if (num(form.kmMax)) p.set("MileageTo", num(form.kmMax));
-      const fuels = (form.fuels||[]).length ? form.fuels : (car?.fuel_type?[car.fuel_type]:[]);
+      const budget = num(form.budget) || (num(car&&car.price_used_dkk) ? Math.round(num(car.price_used_dkk)*1.1) : null);
+      const p = baseParams(form, car, null, budget);
+      const fuels = (form.fuels||[]).length ? form.fuels : (car&&car.fuel_type?[car.fuel_type]:[]);
       fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
-      const bodies = (form.bodies||[]).length ? form.bodies : (car?.body_type?[car.body_type]:[]);
-      bodies.forEach(b=>{ if(BB_BODY[b]) p.append("BodyType", BB_BODY[b]); });
+      const bodies = (form.bodies||[]).length ? form.bodies : (car&&car.body_type?[car.body_type]:[]);
+      bodies.forEach(b=>{ if(BB_BODY[b]) p.append("cartypes", BB_BODY[b]); });
       return `${BILBASEN_BASE}?${p.toString()}`;
     }
 
@@ -396,6 +429,101 @@
       </svg>;
     }
 
+    /* ── Bilbillede: samme vinkel, samme størrelse, samme baggrund på begge kort ── */
+    function carImageUrl(car) {
+      if (!IMAGIN_CUSTOMER) return null;
+      const p = new URLSearchParams({
+        customer: IMAGIN_CUSTOMER,
+        make: car.imagin_make || slugify(car.brand,"-"),
+        modelFamily: car.imagin_model_family || slugify(car.model,"-"),
+        angle: CAR_IMAGE_ANGLE,
+        fileType: "png",
+        width: "640",
+      });
+      const yf = num(car.year_from) || num(String(car.year_range||"").slice(0,4));
+      if (yf) p.set("modelYear", yf);
+      return `https://cdn.imagin.studio/getimage?${p.toString()}`;
+    }
+    /* Silhuetter, så en stationcar ikke tegnes som en SUV.
+       Hver form har karosseri, vinduer og hjulplacering. */
+    const SILHOUETTES = {
+      low: {
+        body: "M10,74 L10,58 Q10,52 18,50 L50,44 L70,26 Q75,21 86,21 L128,21 Q139,21 146,27 L166,48 L182,52 Q190,54 190,61 L190,74 Z",
+        glass:"M58,45 L76,29 Q78,27 84,27 L98,27 L98,45 Z M104,27 L126,27 Q132,27 136,31 L149,45 L104,45 Z",
+        wheels:[[50,74],[152,74]],
+      },
+      tall: {
+        body: "M10,74 L10,52 Q10,46 18,44 L46,38 L62,17 Q67,12 78,12 L136,12 Q147,12 153,19 L170,42 L182,46 Q190,48 190,55 L190,74 Z",
+        glass:"M54,39 L68,20 Q70,18 76,18 L98,18 L98,39 Z M104,18 L134,18 Q140,18 144,23 L155,39 L104,39 Z",
+        wheels:[[52,74],[150,74]],
+      },
+      pickup: {
+        body: "M10,74 L10,56 Q10,50 18,48 L42,44 L58,22 Q63,17 74,17 L110,17 Q118,17 122,24 L134,48 L190,48 Q196,48 196,54 L196,74 Z",
+        glass:"M52,45 L64,25 Q66,23 72,23 L88,23 L88,45 Z M94,23 L108,23 Q113,23 116,28 L124,45 L94,45 Z",
+        wheels:[[50,74],[158,74]],
+      },
+    };
+    const bodyShape = b => ["SUV","MPV"].includes(b) ? "tall" : b==="Pickup" ? "pickup" : "low";
+
+    function CarPhoto({car,tint}) {
+      const C = useC();
+      const url = carImageUrl(car);
+      const [failed,setFailed] = useState(false);
+      const shape = SILHOUETTES[bodyShape(car.body_type)];
+      const paint = tint || C.accent;
+      const box = {height:200,background:C.panel,borderRadius:12,border:`1px solid ${C.border}`,
+        display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",marginBottom:16,position:"relative"};
+
+      if (url && !failed) return <div style={box}>
+        <img src={url} alt={`${car.brand} ${car.model}`} onError={()=>setFailed(true)}
+          style={{width:"100%",height:"100%",objectFit:"contain",padding:12}}/>
+      </div>;
+
+      return <div style={box}>
+        <svg viewBox="0 0 206 92" width="88%" height="88%" role="img" aria-label={`Illustration af ${car.body_type||"bil"}`}>
+          <path d={shape.body} fill={paint}/>
+          <path d={shape.glass} fill={C.panel} opacity=".55"/>
+          {shape.wheels.map(([cx,cy],i)=><g key={i}>
+            <circle cx={cx} cy={cy} r="13" fill={C.text} opacity=".88"/>
+            <circle cx={cx} cy={cy} r="5.5" fill={C.panel}/>
+          </g>)}
+        </svg>
+        <span style={{position:"absolute",bottom:8,right:12,color:C.dim,fontSize:12,fontWeight:600}}>{car.body_type||""}</span>
+      </div>;
+    }
+
+    /* ── Farver bilen blev solgt i herhjemme. Navnet vises ved både hover, tastatur og tryk. ── */
+    const isHex = h => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(h||"").trim());
+    function ColorPalette({colors,selected,onSelect}) {
+      const C = useC();
+      const [hovered,setHovered] = useState(null);
+      const list = (Array.isArray(colors)?colors:[]).filter(c=>c&&c.name&&isHex(c.hex));
+      if (!list.length) return null;
+      const shown = hovered || selected || null;
+      return <div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:10}}>
+          {list.map(c=>{
+            const active = selected && selected.name===c.name;
+            return <button key={c.name} title={c.name} aria-label={`Farve: ${c.name}`} aria-pressed={!!active}
+              onMouseEnter={()=>setHovered(c)} onMouseLeave={()=>setHovered(null)}
+              onFocus={()=>setHovered(c)} onBlur={()=>setHovered(null)}
+              onClick={()=>onSelect(active?null:c)}
+              style={{width:42,height:42,borderRadius:"50%",cursor:"pointer",padding:0,
+                background:c.hex, border:`3px solid ${active?C.accent:C.border2}`,
+                boxShadow:active?`0 0 0 3px ${C.accentSoft}`:"none",
+                transform:active?"scale(1.08)":"none",transition:"transform .12s"}}/>;
+          })}
+        </div>
+        {/* Fast højde, så kortet ikke hopper når navnet skifter */}
+        <div style={{minHeight:24,display:"flex",alignItems:"center",gap:8}}>
+          {shown
+            ? <><span style={{color:C.text,fontSize:15,fontWeight:700}}>{shown.name}</span>
+                {shown.metallic && <span style={{color:C.muted,fontSize:13}}>· metallak</span>}</>
+            : <span style={{color:C.muted,fontSize:14}}>Peg på en farve for at se navnet</span>}
+        </div>
+      </div>;
+    }
+
     function Panel({title,children,tone}) {
       const C = useC();
       return <div style={{background:tone==="accent"?C.accentSoft:C.panel,border:`1px solid ${tone==="accent"?C.accentBorder:C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:12}}>
@@ -467,6 +595,7 @@
       const C = useC();
       const [expanded,setExpanded]=useState(false);
       const [pct,setPct]=useState(5);
+      const [color,setColor]=useState(null);
       if(loading) return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"40px 24px",textAlign:"center",boxShadow:C.shadow}}>
         <div style={{display:"inline-block",width:26,height:26,border:`3px solid ${C.accentSoft}`,borderTopColor:C.accent,borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
         <div style={{color:C.muted,fontSize:15,marginTop:14}}>Finder {isAlt?"alternativt forslag":"bedste match"}…</div>
@@ -486,6 +615,7 @@
         </div>
 
         <div style={{padding:"20px 18px 0"}}>
+          <CarPhoto car={car} tint={color?color.hex:null}/>
           <div style={{marginBottom:16}}>
             <h3 style={{fontFamily:"'Sora',sans-serif",fontSize:25,fontWeight:800,color:C.text,lineHeight:1.15}}>{car.brand} {car.model}</h3>
             <div style={{color:C.muted,fontSize:15,marginTop:4}}>{[car.variant,car.year_range,car.hp?`${car.hp} hk`:null].filter(Boolean).join(" · ")}</div>
@@ -505,6 +635,10 @@
             <button onClick={()=>setExpanded(!expanded)} style={{background:"none",border:"none",color:C.accent,fontSize:15,fontWeight:700,cursor:"pointer",marginTop:6,padding:"6px 0",minHeight:40}}>{expanded?"▲ Skjul":"▼ Læs mere"}</button>
             {expanded && <p style={{color:C.text,fontSize:16,lineHeight:1.75,marginTop:6,paddingTop:12,borderTop:`1px solid ${C.border}`}}>{car.long_why}</p>}
           </Panel>
+
+          {Array.isArray(car.colors_dk) && car.colors_dk.length>0 && <Panel title="Farver solgt i Danmark">
+            <ColorPalette colors={car.colors_dk} selected={color} onSelect={setColor}/>
+          </Panel>}
 
           {car.fdm_verdict && <Panel title="FDM’s vurdering" tone="accent">
             <p style={{color:C.text,fontSize:16,lineHeight:1.65,marginBottom:10}}>{car.fdm_verdict}</p>
