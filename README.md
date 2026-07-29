@@ -58,18 +58,34 @@ uden dem.
 
 ## Bilbilleder
 
-Bilkortene viser et billede med **samme vinkel, samme lys og samme baggrund**
-for alle biler, så de to forslag kan sammenlignes. Billederne kommer fra
-IMAGIN.studio, som kræver en kundenøgle til hvert kald — indsæt den i
-`IMAGIN_CUSTOMER`.
+Billedet på bilkortet hentes i tre trin, og falder lydløst videre til næste
+trin hvis et led ikke svarer:
 
-Uden nøgle, og hvis et billede ikke kan hentes, vises en silhuet i stedet.
-Der er tre former, så en stationcar ikke tegnes som en SUV.
+1. **IMAGIN.studio** — studierenderinger hvor alle biler vises fra samme
+   vinkel i samme lys. Kræver en kundenøgle i `IMAGIN_CUSTOMER`.
+2. **Wikipedia** — hovedbilledet fra bilens artikel. Gratis, ingen nøgle,
+   ingen oprettelse. Bilartiklers hovedbillede er næsten altid et udvendigt
+   dagslysfoto skråt forfra, så billederne bliver rimeligt ensartede.
+3. **Tegning** — en silhuet i tre karosseriformer, så en stationcar ikke
+   tegnes som en SUV.
+
+## Bilbasen-søgninger
+
+Filtrene virker på den flade form, `/brugt/bil?…`. Mærke og model sendes som
+fritekst i `free`, fordi det er den eneste konstruktion vi har kunnet bekræfte
+giver rigtige resultater. Mærke-stien (`/brugt/bil/skoda/octavia`) bruges kun
+til knappen "uden filtre", hvor der ikke hænger parametre på.
+
+Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*. Er
+estimatet nogle procent ved siden af, og båndet smalt, giver søgningen nul
+biler. Brugeren kan selv stramme til ±5 % på kortet.
 
 ## Ting der bør efterprøves med et klik
 
-- **Brændstofkoderne til Bilbasen.** `fuel=2` (diesel) er bekræftet mod en
-  rigtig Bilbasen-URL. Koderne for el, hybrid og plugin-hybrid er ikke, og
-  står i `BB_FUEL`.
+- **Brændstofkoderne.** `fuel=1` (benzin) og `fuel=2` (diesel) er bekræftet
+  mod rigtige Bilbasen-URL'er. El, hybrid og plugin-hybrid er ikke. De står
+  i `BB_FUEL`.
 - **FDM-linket.** Søge-URL'en i `FDM_SEARCH` er ikke verificeret, fordi
   fdm.dk afviser automatiseret adgang.
+- **Wikipedia-billederne.** Koden og begge fallback-veje er testet, men
+  Wikipedias faktiske svar er ikke, af samme grund.

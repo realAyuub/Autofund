@@ -66,32 +66,38 @@ const num = v => { const n = parseInt(String(v).replace(/\D/g,""),10); return is
 /* ═════════════════════════════════════════════════════════════
    TEMA — varm, rolig palet. Lyst er standard, mørkt kan vælges.
    ═════════════════════════════════════════════════════════════ */
+/* Paletten er hentet fra et brugtbilssted med cognacfarvet chesterfield,
+   persiske tæpper og plastikstole i baggården: varm pergament, brændt orange,
+   læderbrun og en støvet petroleumsgrøn. Hjemligt frem for storbyskarpt. */
 const THEMES = {
   light: {
     id:"light",
-    bg:"#faf9f5", surface:"#ffffff", panel:"#f4f2ec", raised:"#ffffff",
-    border:"#e9e5da", border2:"#d8d2c4",
-    text:"#211f1b", muted:"#655f54", dim:"#8c8578",
-    accent:"#b4552f", accentSoft:"#f7ece6", accentBorder:"#e3c0ae", onAccent:"#ffffff",
-    good:"#3f6b48", bad:"#a33c2e", info:"#4a6572",
-    shadow:"0 1px 2px rgba(45,38,28,.04), 0 10px 30px rgba(45,38,28,.05)",
-    shadowLift:"0 2px 6px rgba(180,85,47,.08), 0 16px 44px rgba(180,85,47,.10)",
+    bg:"#f7f1e4", surface:"#fffdf7", panel:"#efe6d3", raised:"#fffdf7",
+    border:"#e2d7c0", border2:"#cdbfa3",
+    text:"#2b2018", muted:"#6b5b48", dim:"#95836c",
+    accent:"#bd5522", accentSoft:"#f7e6d8", accentBorder:"#e0b591", onAccent:"#fffdf7",
+    leather:"#8a5a33",
+    good:"#4a6b4a", bad:"#a33c2e", info:"#4d6b70",
+    shadow:"0 1px 2px rgba(66,48,30,.05), 0 10px 28px rgba(66,48,30,.06)",
+    shadowLift:"0 2px 6px rgba(189,85,34,.10), 0 16px 44px rgba(189,85,34,.13)",
   },
   dark: {
     id:"dark",
-    bg:"#181713", surface:"#211f1a", panel:"#282621", raised:"#2e2b25",
-    border:"#33302a", border2:"#454138",
-    text:"#f1ede3", muted:"#a8a094", dim:"#867e71",
-    accent:"#e08a63", accentSoft:"#3a2a22", accentBorder:"#6b4a37", onAccent:"#1a1815",
-    good:"#7fb389", bad:"#e08878", info:"#8fb0bd",
-    shadow:"0 10px 32px rgba(0,0,0,.4)",
-    shadowLift:"0 16px 48px rgba(224,138,99,.16)",
+    bg:"#1d1611", surface:"#271e17", panel:"#31261d", raised:"#3a2d22",
+    border:"#3d3025", border2:"#54432f",
+    text:"#f2e7d6", muted:"#b3a189", dim:"#8f7c64",
+    accent:"#e07a42", accentSoft:"#3b291d", accentBorder:"#7a5330", onAccent:"#1d1611",
+    leather:"#c08a55",
+    good:"#8bb07f", bad:"#e08878", info:"#8fb0b5",
+    shadow:"0 10px 32px rgba(0,0,0,.45)",
+    shadowLift:"0 16px 48px rgba(224,122,66,.18)",
   },
 };
 const ThemeCtx = createContext(THEMES.light);
 const useC = () => useContext(ThemeCtx);
 
 const DISPLAY = "'Fraunces', Georgia, 'Times New Roman', serif";
+const SHELL = 1140;   // ydre bredde — giver plads til to bilkort ved siden af hinanden
 
 /* ═════════════════════════════════════════════════════════════
    PROFIL TIL AI
@@ -160,49 +166,65 @@ function yearBand(car, form) {
   if (userMin) from = Math.max(from||userMin, userMin);
   return [from, to];
 }
-/* Bilbasen-parametre bekræftet mod rigtige URL'er: pricefrom/priceto,
-   yearfrom/yearto, mileageto, fuel (tal), cartypes (navn), hpfrom, free.
-   includeleasing og includewithoutvehicleregistrationtax slås FRA, fordi
-   leasingannoncer viser månedsydelser og afgiftsfrie biler viser priser uden
-   registreringsafgift — begge dele ødelægger en søgning på prisinterval. */
-function baseParams(form, car, priceLo, priceHi) {
+/* Bilbasens filtre virker på den FLADE form — /brugt/bil?…  Alle fungerende
+   URL'er med parametre bruger den, aldrig mærke-stien med parametre hængt på.
+   Mærke og model sendes derfor som fritekst i "free", hvilket er den eneste
+   konstruktion vi har set give rigtige resultater.
+   Bekræftede parametre: free, fuel (fuel=1 benzin, fuel=2 diesel),
+   pricefrom/priceto, yearfrom/yearto, mileageto, hpfrom, cartypes.
+   includeleasing slås fra, fordi leasingannoncer viser månedsydelser og
+   dermed ødelægger en søgning på prisinterval. */
+function baseParams(form, car, priceLo, priceHi, yearTo) {
   const p = new URLSearchParams();
   if (priceLo) p.set("pricefrom", priceLo);
   if (priceHi) p.set("priceto", priceHi);
   const [yf,yt] = yearBand(car||{}, form);
   if (yf) p.set("yearfrom", yf);
-  if (yt) p.set("yearto", yt);
+  // Kun sæt yearto når vi vil snævre ind. Generationens slutår udelukker ellers
+  // nyere facelift-årgange af samme model helt unødigt.
+  if (yearTo && yt) p.set("yearto", yt);
   if (num(form.kmMax)) p.set("mileageto", num(form.kmMax));
-  if (num(form.minHp)) p.set("hpfrom", num(form.minHp));
   p.set("includeleasing", "false");
-  p.set("includewithoutvehicleregistrationtax", "false");
   return p;
 }
-/* Er modelnavnet ét ord, kan det stå i stien (/skoda/octavia).
-   Er det flere ord, er sti-formen usikker — så ryger modellen i fritekst. */
-function modelPathAndText(car) {
-  const raw = car.bilbasen_model_slug || slugify(car.model);
-  const oneWord = raw && !raw.includes("_");
-  return { path: oneWord ? raw : "", text: oneWord ? "" : (car.model||"") };
-}
-function buildBilbasenModelUrl(form, car, pct=5) {
-  const bs = car.bilbasen_brand_slug || brandSlug(car.brand);
-  const { path: ms, text: modelText } = modelPathAndText(car);
-  const [lo,hi] = priceBand(car, form, pct);
-  const p = baseParams(form, car, lo, hi);
-  const fuels = (form.fuels||[]).length ? form.fuels : (car.fuel_type?[car.fuel_type]:[]);
-  fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
+/* Annoncerne på Bilbasen skriver "VW Golf", ikke "Volkswagen Golf" — så
+   fritekstsøgningen skal bruge sælgernes egne ord, ellers rammer den forbi. */
+const BB_FREE_NAME = {"Volkswagen":"VW","Mercedes-Benz":"Mercedes","DS Automobiles":"DS"};
+
+/* Fritekst der identificerer bilen: mærke + model + evt. variantbetegnelse */
+function searchText(form, car) {
   // Brugerens variantønske må kun bruges hvis bilen faktisk fås i den variant —
   // ellers ender et "vRS"-ønske som fritekst på en Tesla og giver nul resultater.
   const wish = form.variantWish && String(car.variant||"").toLowerCase().includes(form.variantWish.toLowerCase())
     ? form.variantWish : "";
-  const term = [modelText, car.bilbasen_search_term || wish].filter(Boolean).join(" ").trim();
-  if (term) p.set("free", term);
-  return `${BILBASEN_BASE}/${bs}${ms?`/${ms}`:""}?${p.toString()}`;
+  const brand = BB_FREE_NAME[car.brand] || car.brand;
+  return [brand, car.model, car.bilbasen_search_term || wish].filter(Boolean).join(" ").trim();
 }
+/* Filtreret søgning. Prisspændet er som standard bredt, fordi det ligger om et
+   ESTIMAT — er estimatet et par procent ved siden af, og båndet smalt, får man
+   nul resultater. Brugeren kan selv stramme det på kortet. */
+function buildBilbasenModelUrl(form, car, pct=15) {
+  const [lo,hi] = priceBand(car, form, pct);
+  const p = baseParams(form, car, lo, hi, true);
+  const fuels = (form.fuels||[]).length ? form.fuels : (car.fuel_type?[car.fuel_type]:[]);
+  fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
+  if (num(form.minHp)) p.set("hpfrom", num(form.minHp));
+  p.set("free", searchText(form, car));
+  return `${BILBASEN_BASE}?${p.toString()}`;
+}
+/* Alle eksemplarer af modellen, uden filtre. Bilbasens egen modelside er en
+   almindelig, indekseret side — den giver altid resultater, hvis modellen
+   overhovedet er til salg herhjemme. Sikkerhedsnettet når filtrene rammer nul. */
+function buildBilbasenPlainUrl(car) {
+  const bs = car.bilbasen_brand_slug || brandSlug(car.brand);
+  const raw = car.bilbasen_model_slug || slugify(car.model);
+  const oneWord = raw && !raw.includes("_");
+  return oneWord ? `${BILBASEN_BASE}/${bs}/${raw}` : `${BILBASEN_BASE}/${bs}`;
+}
+/* Bredere: samme klasse og budget, uden at binde sig til modellen */
 function buildBilbasenBroadUrl(form, car) {
-  const budget = num(form.budget) || (num(car&&car.price_used_dkk) ? Math.round(num(car.price_used_dkk)*1.1) : null);
-  const p = baseParams(form, car, null, budget);
+  const budget = num(form.budget) || (num(car&&car.price_used_dkk) ? Math.round(num(car.price_used_dkk)*1.15) : null);
+  const p = baseParams(form, car, null, budget, false);
   const fuels = (form.fuels||[]).length ? form.fuels : (car&&car.fuel_type?[car.fuel_type]:[]);
   fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
   const bodies = (form.bodies||[]).length ? form.bodies : (car&&car.body_type?[car.body_type]:[]);
@@ -375,7 +397,7 @@ function Rule() { const C=useC(); return <hr style={{border:"none",borderTop:`1p
 function Stepper({step,maxReached,onGo}) {
   const C = useC();
   return <nav aria-label="Trin i søgningen" style={{position:"sticky",top:0,zIndex:120,background:C.surface,borderBottom:`1px solid ${C.border}`}}>
-    <div style={{maxWidth:900,margin:"0 auto",padding:"14px 14px 12px"}}>
+    <div style={{maxWidth:SHELL,margin:"0 auto",padding:"14px 14px 12px"}}>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"center"}}>
         {STEPS.map((s,i)=>{
           const done = i<step, current = i===step, clickable = i<=maxReached && i!==step;
@@ -452,22 +474,63 @@ function CarSilhouette({body,paint,glass,wheel,style}) {
   </svg>;
 }
 
+/* Wikipedia som gratis billedkilde: ingen nøgle, ingen oprettelse, og
+   bilartiklers hovedbillede er næsten altid et udvendigt dagslysfoto skråt
+   forfra — altså nogenlunde den ensartethed vi er ude efter. Vi prøver dansk
+   Wikipedia først og falder tilbage til engelsk. Svaret gemmes, så samme bil
+   ikke slås op igen. */
+const wikiCache = new Map();
+async function fetchWikiImage(brand, model) {
+  const title = `${brand} ${model}`.trim();
+  if (wikiCache.has(title)) return wikiCache.get(title);
+  const ask = async host => {
+    const u = `https://${host}/w/api.php?action=query&format=json&formatversion=2&origin=*`
+      + `&prop=pageimages&piprop=thumbnail&pithumbsize=640&redirects=1&titles=${encodeURIComponent(title)}`;
+    const r = await fetch(u);
+    if (!r.ok) return null;
+    const d = await r.json();
+    const page = d?.query?.pages?.[0];
+    return page && !page.missing ? (page.thumbnail?.source || null) : null;
+  };
+  let src = null;
+  try { src = await ask("da.wikipedia.org") || await ask("en.wikipedia.org"); }
+  catch (e) { src = null; }
+  wikiCache.set(title, src);
+  return src;
+}
+
 function CarPhoto({car,tint}) {
   const C = useC();
-  const url = carImageUrl(car);
-  const [failed,setFailed] = useState(false);
-  const box = {height:200,background:C.panel,borderRadius:14,border:`1px solid ${C.border}`,
-    display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",marginBottom:18,position:"relative"};
+  const studio = carImageUrl(car);
+  const [src,setSrc] = useState(studio);
+  const [isPhoto,setIsPhoto] = useState(!!studio);
 
-  if (url && !failed) return <div style={box}>
-    <img src={url} alt={`${car.brand} ${car.model}`} loading="lazy" onError={()=>setFailed(true)}
-      style={{width:"100%",height:"100%",objectFit:"contain",padding:12}}/>
+  useEffect(()=>{
+    if (studio) return;                       // studierendering vinder, når nøglen er sat
+    let alive = true;
+    fetchWikiImage(car.brand, car.model).then(url=>{
+      if (alive && url) { setSrc(url); setIsPhoto(true); }
+    });
+    return ()=>{ alive = false; };
+  },[car.brand, car.model, studio]);
+
+  const box = {height:210,background:C.panel,borderRadius:14,border:`1px solid ${C.border}`,
+    display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",marginBottom:18,position:"relative"};
+  const caption = {position:"absolute",bottom:8,right:12,color:C.dim,fontSize:11.5,fontWeight:500,
+    background:C.panel,borderRadius:6,padding:"2px 7px"};
+
+  // Slår billedet fejl, falder vi lydløst tilbage til tegningen
+  if (src && isPhoto) return <div style={box}>
+    <img src={src} alt={`${car.brand} ${car.model}`} loading="lazy"
+      onError={()=>{ setSrc(null); setIsPhoto(false); }}
+      style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+    <span style={caption}>{studio?"Illustrationsfoto":"Foto: Wikimedia"}</span>
   </div>;
 
   return <div style={box}>
     <CarSilhouette body={car.body_type} paint={tint||C.accent} glass={C.panel} wheel={C.text}
       style={{width:"88%",height:"88%"}}/>
-    <span style={{position:"absolute",bottom:9,right:14,color:C.dim,fontSize:12.5,fontWeight:500}}>{car.body_type||""}</span>
+    <span style={caption}>{car.body_type||"Tegning"}</span>
   </div>;
 }
 
@@ -681,16 +744,22 @@ function CarCard({car,form,onReject,isAlt,loading}) {
         </div>
         <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:14}}>
           <span style={{color:C.muted,fontSize:14.5}}>Prisspænd:</span>
-          {[1,5,10,20].map(p=><button key={p} onClick={()=>setPct(p)} style={{padding:"7px 14px",minHeight:40,borderRadius:999,border:`1.5px solid ${pct===p?C.accent:C.border2}`,background:pct===p?C.accentSoft:C.surface,color:pct===p?C.accent:C.muted,fontSize:14,fontWeight:pct===p?700:500,cursor:"pointer",fontFamily:"inherit"}}>±{p}%</button>)}
+          {[5,10,15,25].map(p=><button key={p} onClick={()=>setPct(p)} style={{padding:"7px 14px",minHeight:40,borderRadius:999,border:`1.5px solid ${pct===p?C.accent:C.border2}`,background:pct===p?C.accentSoft:C.surface,color:pct===p?C.accent:C.muted,fontSize:14,fontWeight:pct===p?700:500,cursor:"pointer",fontFamily:"inherit"}}>±{p}%</button>)}
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           <Btn as="a" href={buildBilbasenModelUrl(form,car,pct)} target="_blank" rel="noopener noreferrer" full>
-            Se præcis denne bil på Bilbasen →
+            Søg med disse filtre →
           </Btn>
-          <Btn as="a" href={buildBilbasenBroadUrl(form,car)} target="_blank" rel="noopener noreferrer" kind="ghost" size="sm" full>
-            Se lignende {car.fuel_type||""}-biler i samme klasse →
+          <Btn as="a" href={buildBilbasenPlainUrl(car)} target="_blank" rel="noopener noreferrer" kind="ghost" size="sm" full>
+            Alle {car.brand} {car.model} — uden filtre →
+          </Btn>
+          <Btn as="a" href={buildBilbasenBroadUrl(form,car)} target="_blank" rel="noopener noreferrer" kind="quiet" size="sm" full>
+            Lignende biler i samme klasse →
           </Btn>
         </div>
+        <p style={{color:C.dim,fontSize:13,lineHeight:1.6,marginTop:12}}>
+          Giver den filtrerede søgning ingen biler, så prøv et bredere prisspænd eller “uden filtre”.
+        </p>
       </div>
       <p style={{color:C.dim,fontSize:13,textAlign:"center",paddingBottom:18}}>* Estimater — ikke garantier</p>
     </div>
@@ -872,7 +941,8 @@ function Results({cards,loadingA,loadingB,form,onReject,onRefresh,summary,onPick
       <div style={{color:C.muted,fontSize:12,fontWeight:700,letterSpacing:".09em",textTransform:"uppercase",marginBottom:7}}>Din profil</div>
       <p style={{color:C.text,fontSize:16.5,lineHeight:1.65}}>{summary}</p>
     </div>}
-    <div style={{display:"flex",flexDirection:"column",gap:18}}>
+    {/* Side om side på skærme der har plads, ellers under hinanden */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(370px,1fr))",gap:18,alignItems:"start"}}>
       <CarCard car={cards[0]} form={form} isAlt={false} loading={loadingA} onReject={!loadingA?()=>onReject(0):null}/>
       <CarCard car={cards[1]} form={form} isAlt={true}  loading={loadingB} onReject={!loadingB?()=>onReject(1):null}/>
     </div>
@@ -1201,7 +1271,7 @@ function App() {
     <ThemeCtx.Provider value={C}>
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,zoom:big?1.15:1,display:"flex",flexDirection:"column"}}>
       <header style={{borderBottom:`1px solid ${C.border}`,background:C.bg,position:"relative",zIndex:130}}>
-        <div style={{maxWidth:900,margin:"0 auto",padding:"14px 18px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div style={{maxWidth:SHELL,margin:"0 auto",padding:"14px 18px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
           <button onClick={goHome} title="Til forsiden" aria-label={`${COMPANY_NAME} — til forsiden`}
             style={{display:"flex",alignItems:"baseline",gap:3,background:"transparent",border:"none",cursor:"pointer",padding:"6px 4px",minHeight:46,fontFamily:"inherit"}}>
             <span style={{fontFamily:DISPLAY,fontSize:26,fontWeight:550,color:C.text,letterSpacing:"-.02em"}}>{COMPANY_NAME}</span>
@@ -1220,7 +1290,7 @@ function App() {
 
       {page==="finder" && <Stepper step={stepIdx} maxReached={Math.max(maxReached, showResults?5:maxReached)} onGo={goStep}/>}
 
-      <main style={{maxWidth:900,margin:"0 auto",padding:"0 18px 90px",width:"100%",flex:1}}>
+      <main style={{maxWidth:showResults&&page==="finder"?SHELL:900,margin:"0 auto",padding:"0 18px 90px",width:"100%",flex:1,transition:"max-width .2s"}}>
         {page==="landing" && <Landing onStart={startFinder} go={go}/>}
         {page==="about"   && <AboutPage onStart={startFinder} go={go}/>}
         {page==="pricing" && <PricingPage onStart={startFinder} onPick={s=>setLead(s)}/>}
@@ -1305,7 +1375,7 @@ function App() {
       </main>
 
       <footer style={{borderTop:`1px solid ${C.border}`,padding:"30px 18px 44px"}}>
-        <div style={{maxWidth:900,margin:"0 auto",display:"flex",gap:18,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{maxWidth:SHELL,margin:"0 auto",display:"flex",gap:18,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{color:C.muted,fontSize:15}}>© {new Date().getFullYear()} {COMPANY_NAME} — uafhængig bilrådgivning · Kun Danmark</span>
           <span style={{marginLeft:"auto",display:"flex",gap:2,flexWrap:"wrap"}}>
             <button onClick={goHome} style={navBtn(page==="landing")}>Forside</button>
