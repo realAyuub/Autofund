@@ -38,11 +38,31 @@ Returner KUN ét JSON-objekt for ÉN bilanbefaling. Ingen tekst før/efter, inge
   "cons": ["Ikke billigst i klassen", "Lidt kedelig at køre"],
   "safety_rating": 5,
   "reliability": "Meget høj",
+  "colors_dk": [
+    {"name": "Race Blue", "hex": "#1b3f8b", "metallic": true},
+    {"name": "Corrida Red", "hex": "#c0261f", "metallic": false},
+    {"name": "Moon White", "hex": "#e8e9ea", "metallic": true},
+    {"name": "Steel Grey", "hex": "#6b6f73", "metallic": true},
+    {"name": "Magic Black", "hex": "#101214", "metallic": true}
+  ],
   "bilbasen_brand_slug": "skoda",
   "bilbasen_model_slug": "octavia",
-  "bilbasen_search_term": "vRS"
+  "bilbasen_search_term": "vRS",
+  "imagin_make": "skoda",
+  "imagin_model_family": "octavia"
 }
-short_why: præcis 3 strings. resale: realistiske danske priser i kroner. Svar KUN med JSON.`;
+short_why: præcis 3 strings. resale: realistiske danske priser i kroner.
+
+colors_dk: 4-8 lakfarver modellen faktisk blev solgt i hos danske forhandlere i
+den angivne periode. Brug producentens EGNE farvenavne (f.eks. "Race Blue",
+"Corrida Red"), ikke generiske ord som "blå". "hex" skal være den farve lakken
+reelt ser ud som, i formatet #rrggbb. Kender du ikke de officielle navne for
+modellen, så returner en tom liste frem for at finde på navne.
+
+imagin_make/imagin_model_family: producent og modelfamilie i små bogstaver uden
+årstal eller variant (f.eks. "mercedes-benz" og "c-class").
+
+Svar KUN med JSON.`;
 
 module.exports = async function handler(req, res) {
   try {
