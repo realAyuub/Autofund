@@ -246,19 +246,35 @@ function buildBilbasenBroadUrl(form, car) {
   return `${BILBASEN_BASE}?${p.toString()}`;
 }
 
-async function fetchOneCar(profile) {
-  const res = await fetch("/api/mistral", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ profile }),
-  });
-  if (!res.ok) throw new Error("API fejl " + res.status);
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  const s = text.indexOf("{"), e = text.lastIndexOf("}");
-  if (s === -1 || e === -1) throw new Error("Intet JSON");
-  const parsed = JSON.parse(text.slice(s, e+1));
-  if (!parsed.brand) throw new Error("Mangler brand");
-  return parsed;
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* Serveren svarer med struktureret JSON, så der er ikke længere noget at
+   parse ud af en tekststreng. Til gengæld kan et kald blive afvist midlertidigt
+   — for mange kald på én gang eller et hikke hos modellen — og det er værd at
+   prøve igen, før vi giver op og efterlader et tomt felt på skærmen. */
+async function fetchOneCar(profile, tries=3) {
+  let lastErr;
+  for (let attempt=0; attempt<tries; attempt++) {
+    if (attempt) await sleep(700 * Math.pow(2, attempt-1));   // 700 ms, 1,4 s
+    try {
+      const res = await fetch("/api/recommend", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ profile }),
+      });
+      if (res.status === 429 || res.status >= 500) {          // værd at prøve igen
+        lastErr = new Error("API " + res.status);
+        continue;
+      }
+      if (!res.ok) throw new Error("API " + res.status);       // 4xx: nytter ikke at gentage
+      const data = await res.json();
+      if (!data.car || !data.car.brand) throw new Error("Ufuldstændigt svar");
+      return data.car;
+    } catch (e) {
+      lastErr = e;
+      if (String(e.message).startsWith("API 4")) break;
+    }
+  }
+  throw lastErr || new Error("Ukendt fejl");
 }
 const carKey = c => c ? `${(c.brand||"").toLowerCase()} ${(c.model||"").toLowerCase()}`.trim() : "";
 
@@ -981,7 +997,23 @@ function HelpSection({onPick}) {
   </section>;
 }
 
-function Results({cards,loading,form,onReject,onRefresh,summary,onPickService}) {
+/* Et forslag der ikke kunne hentes. Vises som et rigtigt kort med en
+   forklaring, så pladsen ikke bare står tom. */
+function FailedCard({rank,onRetry}) {
+  const C = useC();
+  return <div style={{background:C.surface,border:`1px dashed ${C.border2}`,borderRadius:18,
+    padding:"40px 24px",textAlign:"center"}}>
+    <div style={{color:C.text,fontSize:17,fontWeight:600,marginBottom:8}}>
+      {RANK_LABEL[rank]||`Forslag ${rank+1}`} kunne ikke hentes
+    </div>
+    <p style={{color:C.muted,fontSize:15.5,lineHeight:1.6,marginBottom:20,maxWidth:"34ch",marginLeft:"auto",marginRight:"auto"}}>
+      Det sker en sjælden gang, når der er tryk på. De øvrige forslag er ikke berørt.
+    </p>
+    <Btn kind="ghost" size="sm" onClick={onRetry}>Prøv dette forslag igen</Btn>
+  </div>;
+}
+
+function Results({cards,loading,failed,onRetry,form,onReject,onRefresh,summary,onPickService}) {
   const C = useC();
   const busy = loading.some(Boolean);
   const shown = cards.filter(Boolean);
@@ -992,10 +1024,10 @@ function Results({cards,loading,form,onReject,onRefresh,summary,onPickService}) 
     </div>}
     {/* To ad gangen på skærme der har plads, ellers under hinanden */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,420px),1fr))",gap:18,alignItems:"start"}}>
-      {cards.map((car,i)=>(car||loading[i])
-        ? <CarCard key={i} car={car} form={form} rank={i} loading={loading[i]}
-            onReject={!loading[i]?()=>onReject(i):null}/>
-        : null)}
+      {cards.map((car,i)=> failed[i] && !loading[i]
+        ? <FailedCard key={i} rank={i} onRetry={()=>onRetry(i)}/>
+        : <CarCard key={i} car={car} form={form} rank={i} loading={loading[i]}
+            onReject={!loading[i]&&car?()=>onReject(i):null}/>)}
     </div>
     {!busy && shown.length>1 && <CompareBox cars={shown}/>}
     <DisclaimerBox/>
@@ -1248,6 +1280,7 @@ function App() {
   const [summary,setSummary] = useState("");
   const [cards,setCards] = useState([null,null,null,null]);
   const [loading,setLoading] = useState([false,false,false,false]);
+  const [failed,setFailed] = useState([false,false,false,false]);
   const [error,setError] = useState("");
   const [excluded,setExcluded] = useState([[],[],[],[]]);
   const [lead,setLead] = useState(null);
@@ -1267,39 +1300,70 @@ function App() {
     return true;
   };
 
-  /* Forslag 1 hentes først og vises med det samme. De tre øvrige hentes
-     derefter parallelt — hver med sin vinkel og med besked om at undgå
-     forslag 1 — så ventetiden ikke bliver fire gange så lang. Dubletter
-     luges ud bagefter. */
+  /* Forslag 1 hentes først og vises med det samme; de tre øvrige hentes
+     derefter parallelt, hver med sin vinkel. Et kort der fejler eller kommer
+     tilbage som en dublet FORSVINDER IKKE — pladsen bliver stående med en
+     forklaring og en prøv-igen-knap, så man ikke sidder med to kort og undrer
+     sig over hvor de andre to blev af. */
+  async function fetchSlot(rank, avoid, avoidCar) {
+    let car = await fetchOneCar(buildProfile(form, rank, avoid, avoidCar));
+    return car;
+  }
+
   async function runSearch(excl) {
     setShowResults(true); setMaxReached(5);
-    setCards([null,null,null,null]); setLoading([true,true,true,true]); setError("");
+    setCards([null,null,null,null]);
+    setLoading([true,true,true,true]);
+    setFailed([false,false,false,false]);
+    setError("");
     top();
 
     let first = null;
     try {
-      first = await fetchOneCar(buildProfile(form,1,excl[0]));
+      first = await fetchSlot(1, excl[0], "");
       setCards(c=>[first,c[1],c[2],c[3]]);
       setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I tre bevidst anderledes bud.`);
-    } catch(e) { setError("Vi kunne ikke hente en anbefaling lige nu. Prøv igen om et øjeblik."); }
+    } catch(e) {
+      setFailed(f=>[true,f[1],f[2],f[3]]);
+    }
     setLoading(l=>[false,l[1],l[2],l[3]]);
 
     const firstName = first ? `${first.brand} ${first.model}` : "";
-    const rest = await Promise.allSettled([2,3,4].map(rank=>
-      fetchOneCar(buildProfile(form, rank, [...excl[rank-1], ...excl[0], firstName].filter(Boolean), firstName))
-    ));
+    const taken = new Set([carKey(first)].filter(Boolean));
 
-    // Luk dubletter ud: en bil der allerede står på et tidligere kort, vises ikke igen
-    const seen = new Set([carKey(first)].filter(Boolean));
-    const out = [null,null,null];
-    rest.forEach((r,i)=>{
-      if (r.status!=="fulfilled") return;
-      const k = carKey(r.value);
-      if (k && !seen.has(k)) { seen.add(k); out[i] = r.value; }
-    });
-    setCards(c=>[c[0], out[0], out[1], out[2]]);
-    setLoading([false,false,false,false]);
-    if (!first && !out.some(Boolean)) setError("Vi kunne ikke hente forslag lige nu. Prøv igen om et øjeblik.");
+    await Promise.all([2,3,4].map(async rank => {
+      const idx = rank-1;
+      const avoid = [...excl[idx], ...excl[0], firstName].filter(Boolean);
+      try {
+        let car = await fetchSlot(rank, avoid, firstName);
+        // Samme bil som et kort vi allerede viser? Bed om en anden, én gang.
+        if (taken.has(carKey(car))) {
+          car = await fetchSlot(rank, [...avoid, `${car.brand} ${car.model}`], firstName);
+        }
+        if (taken.has(carKey(car))) throw new Error("Kun dubletter");
+        taken.add(carKey(car));
+        setCards(c=>c.map((v,i)=>i===idx?car:v));
+      } catch(e) {
+        setFailed(f=>f.map((v,i)=>i===idx?true:v));
+      } finally {
+        setLoading(l=>l.map((v,i)=>i===idx?false:v));
+      }
+    }));
+  }
+
+  /* Prøv ét enkelt felt igen — bruges af knappen på et kort der fejlede */
+  async function retrySlot(idx) {
+    const others = cards.filter((c,i)=>i!==idx && c).map(c=>`${c.brand} ${c.model}`);
+    setFailed(f=>f.map((v,i)=>i===idx?false:v));
+    setLoading(l=>l.map((v,i)=>i===idx?true:v));
+    try {
+      const avoid = [...excluded[idx], ...others].filter(Boolean);
+      const car = await fetchSlot(idx+1, avoid, others[0]||"");
+      setCards(c=>c.map((v,i)=>i===idx?car:v));
+    } catch(e) {
+      setFailed(f=>f.map((v,i)=>i===idx?true:v));
+    }
+    setLoading(l=>l.map((v,i)=>i===idx?false:v));
   }
 
   async function handleReject(idx) {
@@ -1317,7 +1381,7 @@ function App() {
         car = await fetchOneCar(buildProfile(form, idx+1, [...avoid,`${car.brand} ${car.model}`], others[0]||""));
       }
       setCards(c=>c.map((v,i)=>i===idx?car:v));
-    } catch { setError("Vi kunne ikke hente et nyt forslag. Prøv igen om et øjeblik."); }
+    } catch { setFailed(f=>f.map((v,i)=>i===idx?true:v)); }
     setLoading(l=>l.map((v,i)=>i===idx?false:v));
   }
 
@@ -1424,10 +1488,10 @@ function App() {
         </>}
 
         {page==="finder" && showResults && <div style={{paddingTop:30}}><Results
-          cards={cards} loading={loading}
+          cards={cards} loading={loading} failed={failed} onRetry={retrySlot}
           form={form} summary={summary} onReject={handleReject}
           onPickService={s=>setLead(s)}
-          onRefresh={()=>{setShowResults(false);setCards([null,null,null,null]);setSummary("");setExcluded([[],[],[],[]]);setStep(4);top();}}
+          onRefresh={()=>{setShowResults(false);setCards([null,null,null,null]);setFailed([false,false,false,false]);setSummary("");setExcluded([[],[],[],[]]);setStep(4);top();}}
         /></div>}
 
         {error && <p role="alert" style={{color:C.bad,fontSize:16,textAlign:"center",marginTop:20,background:C.surface,border:`1px solid ${C.accentBorder}`,borderRadius:14,padding:"14px 18px"}}>{error}</p>}
