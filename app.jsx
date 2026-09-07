@@ -54,7 +54,11 @@ const STEPS = [
 /* Bilbasen-koder, verificeret mod rigtige Bilbasen-URL'er:
    karosseri er navne (cartypes=MPV), brændstof er tal (fuel=2 = diesel). */
 const BB_FUEL = {Benzin:"1",Diesel:"2",Hybrid:"3","Plugin-hybrid":"4",El:"5"};
-const BB_BODY = {Hatchback:"Hatchback",Sedan:"Sedan",Stationcar:"Stationcar",Cabriolet:"Cabriolet",Pickup:"Pickup",MPV:"MPV",Coupe:"Coupe",SUV:"SUV"};
+/* Værdier til Bilbasens cartypes-filter. "MPV" er bekræftet mod en rigtig
+   Bilbasen-URL; de øvrige følger deres egne kategorinavne. */
+const BB_BODY = {"Mikro":"Mikro","Hatchback":"Hatchback","Coupe":"Coupe","Cabriolet":"Cabriolet",
+  "Sedan":"Sedan","Crossover (CUV)":"CUV","Stationcar":"Stationcar","SUV":"SUV",
+  "Minibus (MPV)":"MPV","Pickup":"Pickup"};
 /* Bilbasen bruger korte navne i mærke-stien (/brugt/bil/vw, ikke /volkswagen)
    med bindestreg i mærker (/alfa-romeo/giulia) og underscore i modeller (/renault/megane_iv) */
 const SLUG_OVERRIDES = {"Volkswagen":"vw","Mercedes-Benz":"mercedes","DS Automobiles":"ds","Land Rover":"land-rover","Alfa Romeo":"alfa-romeo","Aston Martin":"aston-martin","Rolls-Royce":"rolls-royce","VinFast":"vinfast","MG":"mg","BMW":"bmw","BYD":"byd","GWM":"gwm","NIO":"nio","DS":"ds"};
@@ -521,72 +525,85 @@ function carImageUrl(car) {
   if (yf) p.set("modelYear", yf);
   return `https://cdn.imagin.studio/getimage?${p.toString()}`;
 }
-/* Én silhuet per karosseritype, tegnet på et fælles proportionsgitter, så
-   bilerne ser rigtige ud og kan sammenlignes: vej y=77, hjulcentrum y=62,
-   dørtærskel y=61, bæltelinje y=40, tag y=24 for en almindelig personbil.
-   Hjulkasserne er ægte halvcirkler, ikke gættede kurver. viewBox 0 0 200 84.
-   Bruges både som ikon når man vælger karosseri, og på bilkortet når der
-   ikke er et foto. */
-const SILL_DEFAULT = 61;
-/* Bunden tegnes fra højre mod venstre; sweep=0 får buen til at hvælve opad,
-   så hjulkassen bliver en ægte halvcirkel der slutter tæt om dækket. */
-const wheelArches = (fw, rw, r, sill, xEnd) => {
-  const a = r + 4;
-  return `L${rw+a},${sill} A${a},${a} 0 0 0 ${rw-a},${sill}`
-       + ` L${fw+a},${sill} A${a},${a} 0 0 0 ${fw-a},${sill} L${xEnd},${sill} Z`;
+/* Én silhuet per karosseritype, tegnet på ét fælles gitter så bilerne kan
+   sammenlignes: vejbane y=77 for alle, hjulcentrum y=77-r, så hjulene rører
+   vejen. Hver bil er tegnet i sin RIGTIGE indbyrdes størrelse — en mikrobil
+   fylder mindre i rammen end en pickup — så størrelsesrækkefølgen kan ses.
+   Det der adskiller typerne er tre tal: dørtærsklens højde (frihøjde),
+   taghøjden, og vinduernes underkant. En stationcar er lav og lang med et
+   stort vinduesareal; en SUV er høj med store hjul og et dybt karosseri. */
+const GROUND = 77;
+const ARCH_GAP = 3;
+/* Hjulkassen centreres om HJULET, ikke om dørtærsklen. Ellers bliver ringen
+   tykkere foroven end i siderne, og buen ser ud som en bule. */
+const archDx = (r, sill) => {
+  const a = r + ARCH_GAP, dy = sill - (GROUND - r);
+  return Math.sqrt(Math.max(a*a - dy*dy, 1));
+};
+const wheelArches = (fw,rw,r,sill,x0) => {
+  const a = r + ARCH_GAP, dx = archDx(r, sill);
+  return `L${(rw+dx).toFixed(1)},${sill} A${a},${a} 0 0 0 ${(rw-dx).toFixed(1)},${sill}`
+       + ` L${(fw+dx).toFixed(1)},${sill} A${a},${a} 0 0 0 ${(fw-dx).toFixed(1)},${sill} L${x0},${sill} Z`;
 };
 
-/* Rækkefølge efter størrelse, fra mindst til størst. */
-const BODY_TYPES = ["Hatchback","Coupe","Cabriolet","Sedan","Stationcar","SUV","MPV","Pickup"];
+/* Rækkefølge efter størrelse. Navnene følger Bilbasens egne kategorier. */
+const BODY_TYPES = ["Mikro", "Hatchback", "Coupe", "Cabriolet", "Sedan", "Crossover (CUV)", "Stationcar", "SUV", "Minibus (MPV)", "Pickup"];
 
 const CAR_SHAPES = {
-  "Hatchback":{fw:54,rw:146,r:15,sill:61,
-    body:`M14,61 L14,49 Q14,45 19,44 L40,41 L74,40 L90,25 Q93,23 98,23 L134,23 Q139,23 142,26 L160,43 Q165,45 165,50 L165,61 L165,61 A19,19 0 0 0 127,61 L73,61 A19,19 0 0 0 35,61 L14,61 Z`,
-    glass:"M80,38 L94,26 L112,26 L112,38 Z M118,26 L132,26 Q135,26 137,28 L147,38 L118,38 Z",
-    trim:"M24,53 L159,54"},
-  "Coupe":{fw:52,rw:152,r:15,sill:61,
-    body:`M8,61 L8,50 Q8,46 13,45 L38,42 L76,41 L96,27 Q101,25 108,25 L126,25 Q132,25 136,28 L158,41 L182,44 Q189,45 191,50 L191,61 L171,61 A19,19 0 0 0 133,61 L71,61 A19,19 0 0 0 33,61 L8,61 Z`,
-    glass:"M84,39 L99,28 Q101,27 105,27 L122,27 Q127,27 130,30 L141,39 Z",
-    trim:"M18,53 L184,54"},
-  "Cabriolet":{fw:52,rw:152,r:15,sill:61,
-    body:`M8,61 L8,51 Q8,47 13,46 L34,43 L74,42 L86,29 Q88,27 92,27 L99,27 Q102,28 102,32 L102,44 L140,44 Q154,41 168,44 L182,48 Q188,50 188,54 L188,61 L171,61 A19,19 0 0 0 133,61 L71,61 A19,19 0 0 0 33,61 L8,61 Z`,
-    glass:"M88,41 L93,30 Q94,29 96,29 L98,29 L98,41 Z",
-    cabin:"M102,44 L102,38 L140,38 L140,44 Z",
-    trim:"M18,55 L182,56"},
-  "Sedan":{fw:50,rw:152,r:15,sill:61,
-    body:`M6,61 L6,49 Q6,45 11,44 L34,41 L70,40 L88,25 Q91,23 96,23 L130,23 Q135,23 138,26 L150,40 L188,42 Q194,43 194,48 L194,61 L171,61 A19,19 0 0 0 133,61 L69,61 A19,19 0 0 0 31,61 L6,61 Z`,
-    glass:"M76,38 L92,26 L109,26 L109,38 Z M115,26 L129,26 Q132,26 134,28 L141,38 L115,38 Z",
-    trim:"M16,52 L186,53"},
-  "Stationcar":{fw:50,rw:154,r:15,sill:61,
-    body:`M6,61 L6,49 Q6,45 11,44 L34,41 L70,40 L87,24 Q90,22 95,22 L166,22 Q171,22 174,25 L182,40 L190,42 Q194,43 194,48 L194,61 L173,61 A19,19 0 0 0 135,61 L69,61 A19,19 0 0 0 31,61 L6,61 Z`,
-    glass:"M76,38 L92,25 L109,25 L109,38 Z M115,25 L134,25 L134,38 L115,38 Z M140,25 L164,25 Q168,25 170,27 L177,38 L140,38 Z",
-    trim:"M16,52 L186,53"},
-  "SUV":{fw:52,rw:152,r:17,sill:56,
-    body:`M8,56 L8,42 Q8,38 13,37 L32,34 L68,33 L84,17 Q87,15 92,15 L154,15 Q160,15 163,18 L172,33 L186,35 Q191,36 191,41 L191,56 L173,56 A21,21 0 0 0 131,56 L73,56 A21,21 0 0 0 31,56 L8,56 Z`,
-    glass:"M74,31 L89,18 L107,18 L107,31 Z M113,18 L131,18 L131,31 L113,31 Z M137,18 L152,18 Q156,18 158,20 L165,31 L137,31 Z",
-    trim:"M18,46 L184,47"},
-  "MPV":{fw:50,rw:154,r:15,sill:61,
-    body:`M6,61 L6,46 Q6,42 11,41 L22,38 L56,17 Q60,14 68,14 L162,14 Q169,14 172,18 L182,38 Q190,40 192,45 L192,61 L173,61 A19,19 0 0 0 135,61 L69,61 A19,19 0 0 0 31,61 L6,61 Z`,
-    glass:"M44,36 L62,19 Q64,18 68,18 L94,18 L94,36 Z M100,18 L124,18 L124,36 L100,36 Z M130,18 L160,18 Q164,18 166,20 L175,36 L130,36 Z",
-    trim:"M16,50 L184,51"},
-  "Pickup":{fw:48,rw:156,r:15,sill:61,
-    body:`M6,61 L6,49 Q6,45 11,44 L28,41 L60,40 L78,23 Q81,21 86,21 L116,21 Q121,21 124,24 L134,40 L134,41 L192,41 Q195,41 195,44 L195,61 L175,61 A19,19 0 0 0 137,61 L67,61 A19,19 0 0 0 29,61 L6,61 Z`,
-    glass:"M66,38 L82,24 L101,24 L101,38 Z M107,24 L114,24 Q118,24 120,26 L127,38 L107,38 Z",
-    trim:"M16,52 L132,53"},
+  "Mikro":{fw:70,rw:132,r:12,sill:63,
+    body:`M48,63 L48,52 Q48,48 53,47 L62,45 L74,30 Q77,28 82,28 L118,28 Q123,28 126,31 L136,45 Q142,47 145,51 L146,56 L146,63 L146.9,63 A15,15 0 0 0 117.1,63 L84.9,63 A15,15 0 0 0 55.1,63 L48,63 Z`,
+    glass:"M68,43 L78,31 L96,31 L96,43 Z M102,31 L116,31 Q119,31 121,33 L128,43 L102,43 Z",
+    trim:"M56,55 L142,56"},
+  "Hatchback":{fw:56,rw:146,r:14,sill:62,
+    body:`M26,62 L26,50 Q26,46 31,45 L48,42 L78,41 L92,26 Q95,24 100,24 L134,24 Q139,24 142,27 L158,43 Q164,45 166,49 L167,54 L167,62 L163.0,62 A17,17 0 0 0 129.0,62 L73.0,62 A17,17 0 0 0 39.0,62 L26,62 Z`,
+    glass:"M82,39 L95,27 L112,27 L112,39 Z M118,27 L132,27 Q135,27 137,29 L146,39 L118,39 Z",
+    trim:"M34,54 L162,55"},
+  "Coupe":{fw:52,rw:152,r:14,sill:62,
+    body:`M14,62 L14,52 Q14,48 19,47 L44,44 L80,43 L98,29 Q103,27 110,27 L126,27 Q132,27 136,30 L160,43 L180,46 Q186,47 186,52 L186,62 L169.0,62 A17,17 0 0 0 135.0,62 L69.0,62 A17,17 0 0 0 35.0,62 L14,62 Z`,
+    glass:"M88,41 L101,30 Q103,29 107,29 L123,29 Q128,29 131,32 L142,41 Z",
+    trim:"M22,55 L180,56"},
+  "Cabriolet":{fw:52,rw:152,r:14,sill:62,
+    body:`M14,62 L14,52 Q14,48 19,47 L44,44 L80,43 L90,31 Q92,29 96,29 L103,29 Q106,30 106,34 L106,46 L142,46 Q156,43 168,46 L180,50 Q186,52 186,56 L186,62 L169.0,62 A17,17 0 0 0 135.0,62 L69.0,62 A17,17 0 0 0 35.0,62 L14,62 Z`,
+    glass:"M92,42 L97,32 Q98,31 100,31 L102,31 L102,42 Z",
+    cabin:"M106,46 L106,40 L142,40 L142,46 Z",
+    trim:"M22,56 L180,57"},
+  "Sedan":{fw:50,rw:154,r:14,sill:62,
+    body:`M8,62 L8,50 Q8,46 13,45 L36,42 L72,41 L90,26 Q93,24 98,24 L132,24 Q137,24 140,27 L152,41 L188,43 Q193,44 193,49 L193,62 L171.0,62 A17,17 0 0 0 137.0,62 L67.0,62 A17,17 0 0 0 33.0,62 L8,62 Z`,
+    glass:"M78,39 L94,27 L111,27 L111,39 Z M117,27 L131,27 Q134,27 136,29 L143,39 L117,39 Z",
+    trim:"M18,54 L186,55"},
+  "Crossover (CUV)":{fw:56,rw:146,r:16,sill:57,
+    body:`M28,57 L28,44 Q28,40 33,39 L50,36 L80,35 L94,20 Q97,18 102,18 L134,18 Q139,18 142,21 L156,37 Q162,39 164,43 L165,48 L165,57 L164.6,57 A19,19 0 0 0 127.4,57 L74.6,57 A19,19 0 0 0 37.4,57 L28,57 Z`,
+    glass:"M84,33 L97,21 L113,21 L113,33 Z M119,21 L132,21 Q135,21 137,23 L145,33 L119,33 Z",
+    trim:"M36,49 L160,50"},
+  "Stationcar":{fw:48,rw:158,r:13,sill:63,
+    body:`M6,63 L6,52 Q6,48 11,47 L34,44 L70,43 L86,25 Q89,23 94,23 L172,23 Q177,23 180,26 L188,43 L192,45 Q195,46 195,50 L195,63 L174.0,63 A16,16 0 0 0 142.0,63 L64.0,63 A16,16 0 0 0 32.0,63 L6,63 Z`,
+    glass:"M76,41 L92,26 L110,26 L110,41 Z M116,26 L138,26 L138,41 L116,41 Z M144,26 L170,26 Q174,26 176,28 L184,41 L144,41 Z",
+    trim:"M16,55 L188,56"},
+  "SUV":{fw:54,rw:150,r:19,sill:56,
+    body:`M14,56 L14,36 Q14,32 19,31 L36,28 L74,27 L88,10 Q91,8 96,8 L156,8 Q162,8 165,11 L174,27 L184,29 Q189,30 189,35 L189,56 L171.9,56 A22,22 0 0 0 128.1,56 L75.9,56 A22,22 0 0 0 32.1,56 L14,56 Z`,
+    glass:"M80,25 L93,11 L112,11 L112,25 Z M118,11 L138,11 L138,25 L118,25 Z M144,11 L154,11 Q158,11 160,13 L168,25 L144,25 Z",
+    trim:"M22,44 L182,45"},
+  "Minibus (MPV)":{fw:48,rw:158,r:14,sill:62,
+    body:`M6,62 L6,44 Q6,40 11,39 L20,35 L52,12 Q56,9 64,9 L170,9 Q177,9 180,13 L190,35 Q195,38 196,43 L196,62 L175.0,62 A17,17 0 0 0 141.0,62 L65.0,62 A17,17 0 0 0 31.0,62 L6,62 Z`,
+    glass:"M40,33 L58,14 Q60,13 64,13 L96,13 L96,33 Z M102,13 L130,13 L130,33 L102,33 Z M136,13 L168,13 Q172,13 174,15 L184,33 L136,33 Z",
+    trim:"M16,50 L190,51"},
+  "Pickup":{fw:46,rw:160,r:15,sill:61,
+    body:`M4,61 L4,49 Q4,45 9,44 L26,41 L58,40 L76,22 Q79,20 84,20 L116,20 Q121,20 124,23 L134,40 L134,42 L194,42 Q197,42 197,45 L197,61 L178.0,61 A18,18 0 0 0 142.0,61 L64.0,61 A18,18 0 0 0 28.0,61 L4,61 Z`,
+    glass:"M64,38 L80,23 L101,23 L101,38 Z M107,23 L114,23 Q118,23 120,25 L127,38 L107,38 Z",
+    trim:"M14,52 L132,53"},
 };
 
 function CarSilhouette({body,paint,glass,wheel,style}) {
   const sh = CAR_SHAPES[body] || CAR_SHAPES.Hatchback;
-  const a = sh.r + 4, cy = sh.sill + 1;
-  const arch = cx => `M${cx-a},${sh.sill} A${a},${a} 0 0 1 ${cx+a},${sh.sill} Z`;
+  const cy = GROUND - sh.r, a = sh.r + ARCH_GAP;
   return <svg viewBox="0 0 200 84" role="img" aria-label={`Tegning af ${body||"bil"}`} style={style}>
-    {/* Hjulkassen bag hjulet, så mellemrummet læses som skygge og ikke som et hul */}
+    {/* Hjulkassen bag hjulet, så mellemrummet ind til dækket læses som skygge */}
     {[sh.fw,sh.rw].map((cx,i)=><g key={"w"+i}>
-      <path d={arch(cx)} fill={paint}/>
-      <path d={arch(cx)} fill={wheel} opacity=".38"/>
+      <circle cx={cx} cy={cy} r={a} fill={paint}/>
+      <circle cx={cx} cy={cy} r={a} fill={wheel} opacity=".4"/>
     </g>)}
     <path d={sh.body} fill={paint}/>
-    {sh.cabin && <path d={sh.cabin} fill={wheel} opacity=".38"/>}
+    {sh.cabin && <path d={sh.cabin} fill={wheel} opacity=".4"/>}
     <path d={sh.glass} fill={glass} opacity=".75"/>
     <path d={sh.trim} stroke={wheel} strokeOpacity=".13" strokeWidth="2" fill="none"/>
     {[sh.fw,sh.rw].map((cx,i)=><g key={"h"+i}>

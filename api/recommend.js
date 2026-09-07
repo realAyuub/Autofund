@@ -35,11 +35,21 @@ PRÆCISION — det vigtigste af det hele:
 - "bilbasen_search_term" er det korte ord man søger på hos en forhandler for at ramme varianten (f.eks. "vRS", "GTI"). Lad feltet stå tomt hvis modellen ikke har en særlig variantbetegnelse.
 - "bilbasen_model_slug" skal være modelnavnet som ét ord i små bogstaver uden mærket, f.eks. "octavia", "golf", "3-serie". Kan modellen ikke skrives som ét ord, så lad feltet stå tomt.
 
+KAROSSERI: Brug den kategori bilen sælges under i Danmark. "Mikro" er de
+mindste bybiler. "Crossover (CUV)" er en hævet hatchback — mindre og lavere end
+en SUV. "Minibus (MPV)" er en høj etrumsbil med plads til mange.
+
 SPROG: Alt indhold skrives på dansk, i et roligt og konkret sprog uden fagudtryk. Skriv til en person der ikke interesserer sig for biler.
 
 colors_dk: 4-8 lakfarver modellen faktisk blev solgt i hos danske forhandlere i perioden. Brug producentens EGNE farvenavne ("Race Blue", "Corrida Red"), ikke generiske ord som "blå". "hex" skal være den farve lakken reelt ser ud som. Kender du ikke de officielle navne, så returner en tom liste frem for at finde på dem.
 
-wikipedia_title: titlen på modellens artikel på ENGELSK Wikipedia, så vi kan finde et billede. Brug det internationale modelnavn — "BMW 1 Series", ikke "BMW 1-serie"; "Mercedes-Benz C-Class", ikke "Mercedes C-Klasse".
+wikipedia_title: titlen på den MEST SPECIFIKKE artikel om bilen på ENGELSK
+Wikipedia, så billedet ligner den rigtige bil. Findes der en artikel om netop
+varianten, så brug den — "Volkswagen Golf GTI" frem for "Volkswagen Golf",
+fordi en GTI ser markant anderledes ud end en standardmodel. Findes der kun en
+artikel om generationen, så brug den ("Volkswagen Golf Mk8"). Brug altid det
+internationale modelnavn: "BMW 1 Series", ikke "BMW 1-serie"; "Mercedes-Benz
+C-Class", ikke "Mercedes C-Klasse".
 
 short_why: præcis 3 punkter, hver på højst 8 ord.
 resale: realistiske danske gensalgspriser i kroner, år for år.`;
@@ -68,7 +78,7 @@ const CAR_SCHEMA = {
     year_from: { type: "integer" },
     year_to: { type: "integer" },
     hp: { type: "integer" },
-    body_type: { type: "string", enum: ["Hatchback","Sedan","Stationcar","SUV","MPV","Cabriolet","Pickup","Coupe"] },
+    body_type: { type: "string", enum: ["Mikro", "Hatchback", "Coupe", "Cabriolet", "Sedan", "Crossover (CUV)", "Stationcar", "SUV", "Minibus (MPV)", "Pickup"] },
     transmission: { type: "string" },
     short_why: { type: "array", items: { type: "string" }, description: "Præcis 3 punkter, hver på højst 8 ord" },
     long_why: { type: "string" },
