@@ -54,10 +54,13 @@ const STEPS = [
 /* Bilbasen-koder, verificeret mod rigtige Bilbasen-URL'er:
    karosseri er navne (cartypes=MPV), brændstof er tal (fuel=2 = diesel). */
 const BB_FUEL = {Benzin:"1",Diesel:"2",Hybrid:"3","Plugin-hybrid":"4",El:"5"};
-/* Værdier til Bilbasens cartypes-filter. "MPV" er bekræftet mod en rigtig
-   Bilbasen-URL; de øvrige følger deres egne kategorinavne. */
-const BB_BODY = {"Mikro":"Mikro","Hatchback":"Hatchback","Coupe":"Coupe","Cabriolet":"Cabriolet",
-  "Sedan":"Sedan","Crossover (CUV)":"CUV","Stationcar":"Stationcar","SUV":"SUV",
+/* Værdier til Bilbasens cartypes-filter. Kun værdier vi har belæg for.
+   "Mikro" og "Crossover (CUV)" står bevidst IKKE her: vi kender ikke Bilbasens
+   filterværdi for dem, og et gæt ville kunne give nul resultater. Vælger man
+   dem, udelades karosserifilteret blot fra den brede søgning — resten af
+   filtrene virker uændret, og hovedknappen bruger alligevel ikke cartypes. */
+const BB_BODY = {"Hatchback":"Hatchback","Coupe":"Coupe","Cabriolet":"Cabriolet",
+  "Sedan":"Sedan","Stationcar":"Stationcar","SUV":"SUV",
   "Minibus (MPV)":"MPV","Pickup":"Pickup"};
 /* Bilbasen bruger korte navne i mærke-stien (/brugt/bil/vw, ikke /volkswagen)
    med bindestreg i mærker (/alfa-romeo/giulia) og underscore i modeller (/renault/megane_iv) */
