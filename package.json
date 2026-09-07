@@ -1,0 +1,8 @@
+{
+  "name": "autofund",
+  "private": true,
+  "description": "Uafhængig bilrådgivning",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0"
+  }
+}
