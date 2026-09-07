@@ -44,7 +44,11 @@ wikipedia_title: titlen på modellens artikel på ENGELSK Wikipedia, så vi kan 
 short_why: præcis 3 punkter, hver på højst 8 ord.
 resale: realistiske danske gensalgspriser i kroner, år for år.`;
 
-/* Skemaet tvinger svaret på plads. Modellen kan ikke returnere andet end dette. */
+/* Skemaet tvinger svaret på plads. Modellen kan ikke returnere andet end dette.
+   BEMÆRK: strukturerede svar understøtter kun en delmængde af JSON Schema.
+   minItems/maxItems, minimum/maximum og pattern giver 400 og må IKKE stå her —
+   antal og format skrives i "description" og i systemprompten i stedet, og
+   frontenden håndterer alligevel afvigelser. */
 const CAR_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -66,7 +70,7 @@ const CAR_SCHEMA = {
     hp: { type: "integer" },
     body_type: { type: "string", enum: ["Hatchback","Sedan","Stationcar","SUV","MPV","Cabriolet","Pickup","Coupe"] },
     transmission: { type: "string" },
-    short_why: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 3 },
+    short_why: { type: "array", items: { type: "string" }, description: "Præcis 3 punkter, hver på højst 8 ord" },
     long_why: { type: "string" },
     differs_from_primary: { type: "string", description: "Tom streng for forslag 1" },
     fdm_verdict: { type: "string" },
@@ -79,18 +83,18 @@ const CAR_SCHEMA = {
       required: ["y1","y2","y3","y4","y5","y6","y7","y8"],
       properties: Object.fromEntries(["y1","y2","y3","y4","y5","y6","y7","y8"].map(k=>[k,{type:"integer"}])),
     },
-    pros: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4 },
-    cons: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4 },
-    safety_rating: { type: "integer", minimum: 1, maximum: 5 },
+    pros: { type: "array", items: { type: "string" }, description: "2-4 fordele" },
+    cons: { type: "array", items: { type: "string" }, description: "2-4 ulemper" },
+    safety_rating: { type: "integer", description: "Euro NCAP-stjerner, 1-5" },
     reliability: { type: "string" },
     colors_dk: {
-      type: "array", maxItems: 8,
+      type: "array", description: "4-8 lakfarver, eller tom liste hvis de officielle navne er ukendte",
       items: {
         type: "object", additionalProperties: false,
         required: ["name","hex","metallic"],
         properties: {
           name: { type: "string" },
-          hex: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" },
+          hex: { type: "string", description: "Farvekode i formatet #rrggbb" },
           metallic: { type: "boolean" },
         },
       },
@@ -199,7 +203,11 @@ module.exports = async function handler(req, res) {
     if (err instanceof Anthropic.APIError) {
       console.error("Claude API-fejl", err.status, err.message);
       res.statusCode = err.status >= 500 ? 502 : 400;
-      return res.end(JSON.stringify({ error: "CLAUDE_ERROR", status: err.status, hint: `Claude svarede med fejl ${err.status}.` }));
+      // Tag API'ets egen forklaring med. Uden den er et 400 umuligt at
+      // diagnosticere udefra, og det kostede os en runde.
+      const detail = String(err.message || "").slice(0, 300);
+      return res.end(JSON.stringify({ error: "CLAUDE_ERROR", status: err.status,
+        hint: `Claude svarede med fejl ${err.status}. ${detail}` }));
     }
     console.error("Uventet fejl i api/recommend:", err);
     res.statusCode = 500;

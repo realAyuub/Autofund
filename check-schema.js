@@ -1,0 +1,45 @@
+#!/usr/bin/env node
+// Kontrollerer at CAR_SCHEMA i api/recommend.js kun bruger de dele af JSON
+// Schema som Claudes strukturerede svar understøtter.
+//
+// Baggrund: skemaet indeholdt engang minItems, maximum og pattern. Det er
+// almindeligt JSON Schema, men strukturerede svar afviser det med 400, og
+// hele siden holdt op med at vise bilforslag. Kør denne efter ændringer i
+// skemaet:  node check-schema.js
+const fs = require("fs");
+const path = require("path");
+
+const src = fs.readFileSync(path.join(__dirname, "api/recommend.js"), "utf8");
+const m = src.match(/const CAR_SCHEMA = (\{[\s\S]*?\n\};)/);
+if (!m) { console.error("Fandt ikke CAR_SCHEMA i api/recommend.js"); process.exit(1); }
+const schema = eval("(" + m[1].replace(/;$/, "") + ")");
+
+const IKKE_UNDERSTOETTET = [
+  "minItems","maxItems","uniqueItems",          // komplekse array-begrænsninger
+  "minimum","maximum","exclusiveMinimum","exclusiveMaximum","multipleOf",
+  "minLength","maxLength","pattern","patternProperties",
+];
+
+const fejl = [];
+(function walk(node, sti) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) return node.forEach((v, i) => walk(v, `${sti}[${i}]`));
+  for (const k of Object.keys(node)) {
+    if (IKKE_UNDERSTOETTET.includes(k)) fejl.push(`${sti}.${k}`);
+    if (k === "type" && node[k] === "object" && node.additionalProperties !== false)
+      fejl.push(`${sti}: additionalProperties skal være false`);
+    if (k === "properties") {
+      const mangler = Object.keys(node.properties).filter(p => !(node.required || []).includes(p));
+      if (mangler.length) fejl.push(`${sti}: mangler i required → ${mangler.join(", ")}`);
+    }
+    walk(node[k], `${sti}.${k}`);
+  }
+})(schema, "schema");
+
+console.log(`Felter: ${Object.keys(schema.properties).length} · required: ${schema.required.length}`);
+if (fejl.length) {
+  console.error("\nSkemaet vil give 400 fra API'et:");
+  fejl.forEach(f => console.error("  ✗", f));
+  process.exit(1);
+}
+console.log("✓ Skemaet bruger kun understøttede nøgleord");

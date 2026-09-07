@@ -12,6 +12,7 @@ FDM-vurdering og færdige søgninger på Bilbasen.
 | `app.jsx` | **Kildekoden.** Al funktionalitet og design ligger her. |
 | `app.js` | Den byggede fil, som browseren henter. Skal ikke redigeres i hånden. |
 | `api/recommend.js` | Henter én bilanbefaling fra Claude. |
+| `check-schema.js` | Kontrollerer at svar-skemaet er gyldigt. Kør efter ændringer i skemaet. |
 | `api/lead.js` | Modtager forespørgsler fra "Vil du have et menneske med på råd?". |
 
 ## Sådan bygger du efter en ændring
@@ -106,6 +107,12 @@ prøv-igen-knap. Et forslag må aldrig bare forsvinde uden besked.
 
 Svaret fra Claude kommer som struktureret JSON efter et skema, så der ikke er
 nogen tekst at parse og intet at gætte på.
+
+**Skemaet må kun bruge en delmængde af JSON Schema.** `minItems`, `maxItems`,
+`minimum`, `maximum` og `pattern` er almindeligt JSON Schema, men strukturerede
+svar afviser dem med 400 — og så holder hele siden op med at vise bilforslag.
+Antal og format skrives i `description` i stedet. Kør `node check-schema.js`
+efter ændringer i skemaet; den fanger det.
 
 ## Ting der bør efterprøves med et klik
 
