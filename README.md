@@ -11,7 +11,7 @@ FDM-vurdering og færdige søgninger på Bilbasen.
 | `index.html` | HTML-skallen: fonte, farver, favicon. Rører sjældent. |
 | `app.jsx` | **Kildekoden.** Al funktionalitet og design ligger her. |
 | `app.js` | Den byggede fil, som browseren henter. Skal ikke redigeres i hånden. |
-| `api/mistral.js` | Henter bilanbefalingen fra Mistral. |
+| `api/recommend.js` | Henter én bilanbefaling fra Claude. |
 | `api/lead.js` | Modtager forespørgsler fra "Vil du have et menneske med på råd?". |
 
 ## Sådan bygger du efter en ændring
@@ -46,8 +46,9 @@ Sættes i Vercel under Settings → Environment Variables.
 
 | Variabel | Krævet | Betydning |
 | --- | --- | --- |
-| `MISTRAL_API_KEY` | Ja | API-nøgle til Mistral. |
-| `MISTRAL_MODEL` | Nej | Standard er `mistral-large-latest`. Sæt til `mistral-small-latest` for at spare. |
+| `ANTHROPIC_API_KEY` | Ja | API-nøgle til Claude. |
+| `CLAUDE_MODEL` | Nej | Standard er `claude-opus-5`. `claude-sonnet-5` er billigere. |
+| `CLAUDE_EFFORT` | Nej | Standard `high`. `medium` eller `low` er hurtigere og billigere. |
 | `RESEND_API_KEY` | Nej | Sender forespørgsler som e-mail. |
 | `LEAD_TO_EMAIL` | Nej | Modtageradressen. |
 | `LEAD_FROM_EMAIL` | Nej | Afsender på et domæne verificeret hos Resend. |
@@ -63,22 +64,43 @@ trin hvis et led ikke svarer:
 
 1. **IMAGIN.studio** — studierenderinger hvor alle biler vises fra samme
    vinkel i samme lys. Kræver en kundenøgle i `IMAGIN_CUSTOMER`.
-2. **Wikipedia** — hovedbilledet fra bilens artikel. Gratis, ingen nøgle,
-   ingen oprettelse. Bilartiklers hovedbillede er næsten altid et udvendigt
-   dagslysfoto skråt forfra, så billederne bliver rimeligt ensartede.
+2. **Wikipedia** — hovedbilledet fra bilens artikel, fundet med Wikipedias
+   søgning frem for et præcist titelopslag. Danske modelnavne rammer sjældent
+   en artikeltitel: "BMW 1-serie" hedder "BMW 1 Series" på engelsk. AI'en
+   leverer desuden et `wikipedia_title` som første gæt. Gratis, ingen nøgle.
 3. **Tegning** — en silhuet i tre karosseriformer, så en stationcar ikke
    tegnes som en SUV.
 
 ## Bilbasen-søgninger
 
-Filtrene virker på den flade form, `/brugt/bil?…`. Mærke og model sendes som
-fritekst i `free`, fordi det er den eneste konstruktion vi har kunnet bekræfte
-giver rigtige resultater. Mærke-stien (`/brugt/bil/skoda/octavia`) bruges kun
-til knappen "uden filtre", hvor der ikke hænger parametre på.
+Søgningen bygges i den rækkefølge, der snævrer mest ind først:
+
+1. **mærke og model** som sti — `/brugt/bil/vw/golf`
+2. **årgang** — `yearfrom` / `yearto`
+3. **prisklasse** — `pricefrom` / `priceto`
+4. **brændstof og km** — `fuel` / `mileageto`
+5. **fritekst til sidst** — `free`, kun til varianter som `vRS`
+
+Sti og parametre virker sammen. Fritekst bruges bevidst ikke til mærke og
+model — det er stiens opgave, og dobbeltbinding er den hurtigste vej til nul
+resultater.
 
 Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*. Er
 estimatet nogle procent ved siden af, og båndet smalt, giver søgningen nul
 biler. Brugeren kan selv stramme til ±5 % på kortet.
+
+## Fire forslag ad gangen
+
+Forslag 1 hentes først og vises med det samme. De tre øvrige hentes derefter
+parallelt, hver med sin vinkel (alternativ, prisfornuftigt, overraskende).
+
+Et kald der bliver afvist prøves automatisk igen to gange med stigende
+ventetid. Lykkes det stadig ikke — eller kommer den samme bil igen som et af
+de andre kort — bliver pladsen stående med en forklaring og en
+prøv-igen-knap. Et forslag må aldrig bare forsvinde uden besked.
+
+Svaret fra Claude kommer som struktureret JSON efter et skema, så der ikke er
+nogen tekst at parse og intet at gætte på.
 
 ## Ting der bør efterprøves med et klik
 

@@ -132,9 +132,16 @@ function buildProfile(f, rank, exclude, avoidCar) {
   if ((f.bodies||[]).length) hard.push(`Karosseri skal være: ${f.bodies.join(" eller ")}.`);
   if ((f.excludeBrands||[]).length) hard.push(`Må ALDRIG være: ${f.excludeBrands.join(", ")}.`);
 
-  const rankTxt = rank===2
-    ? `Dette er FORSLAG 2 (alternativet). Det SKAL være et markant anderledes valg end forslag 1 — vælg et andet mærke OG enten anden karosseriform eller andet drivmiddel. Forklar i "differs_from_primary" med én sætning hvad der konkret adskiller den fra ${avoidCar||"forslag 1"}.`
-    : `Dette er FORSLAG 1 — det bedste samlede match.`;
+  // Hvert forslag får sin egen vinkel, så de fire bud ikke ender som variationer
+  // over samme bil. Vinklerne er formuleret som krav, ikke som ønsker.
+  const ANGLES = {
+    2: 'Dette er FORSLAG 2. Vælg et ANDET MÆRKE end forslag 1, og enten en anden karosseriform eller et andet drivmiddel.',
+    3: 'Dette er FORSLAG 3. Find det mest PRISFORNUFTIGE valg der stadig opfylder kravene — lavest samlede ejeromkostninger over fem år. Andet mærke end de foregående.',
+    4: 'Dette er FORSLAG 4. Find det mest OVERRASKENDE valg — en bil de færreste ville tænke på, men som passer til profilen. Andet mærke end de foregående.',
+  };
+  const rankTxt = rank===1
+    ? `Dette er FORSLAG 1 — det bedste samlede match.`
+    : `${ANGLES[rank]||`Dette er FORSLAG ${rank}, og det skal være markant anderledes end de foregående.`} Forklar i "differs_from_primary" med én sætning hvad der konkret adskiller den fra ${avoidCar||"de øvrige forslag"}.`;
 
   return [
     lines.join("\n"),
@@ -166,60 +173,67 @@ function yearBand(car, form) {
   if (userMin) from = Math.max(from||userMin, userMin);
   return [from, to];
 }
-/* Bilbasens filtre virker på den FLADE form — /brugt/bil?…  Alle fungerende
-   URL'er med parametre bruger den, aldrig mærke-stien med parametre hængt på.
-   Mærke og model sendes derfor som fritekst i "free", hvilket er den eneste
-   konstruktion vi har set give rigtige resultater.
-   Bekræftede parametre: free, fuel (fuel=1 benzin, fuel=2 diesel),
-   pricefrom/priceto, yearfrom/yearto, mileageto, hpfrom, cartypes.
-   includeleasing slås fra, fordi leasingannoncer viser månedsydelser og
-   dermed ødelægger en søgning på prisinterval. */
+/* Søgningen bygges i den rækkefølge, der snævrer mest ind først og gør mindst
+   skade hvis et led rammer forbi:
+     1. mærke og model som sti  — /brugt/bil/vw/golf
+     2. årgang                  — yearfrom / yearto
+     3. prisklasse              — pricefrom / priceto
+     4. brændstof og km         — fuel / mileageto
+     5. fritekst til SIDST      — free, kun til varianter som "vRS"
+   Sti og parametre virker sammen; det er bekræftet af rigtige Bilbasen-URL'er
+   som /brugt/varebil-inkl-moms/reg-østjylland?IncludeLeasing=True&Free=…
+   Fritekst bruges bevidst ikke til mærke og model — det er sti'ens opgave, og
+   dobbeltbinding er den hurtigste vej til nul resultater. */
 function baseParams(form, car, priceLo, priceHi, yearTo) {
   const p = new URLSearchParams();
-  if (priceLo) p.set("pricefrom", priceLo);
-  if (priceHi) p.set("priceto", priceHi);
   const [yf,yt] = yearBand(car||{}, form);
   if (yf) p.set("yearfrom", yf);
   // Kun sæt yearto når vi vil snævre ind. Generationens slutår udelukker ellers
   // nyere facelift-årgange af samme model helt unødigt.
   if (yearTo && yt) p.set("yearto", yt);
+  if (priceLo) p.set("pricefrom", priceLo);
+  if (priceHi) p.set("priceto", priceHi);
   if (num(form.kmMax)) p.set("mileageto", num(form.kmMax));
   p.set("includeleasing", "false");
   return p;
 }
-/* Annoncerne på Bilbasen skriver "VW Golf", ikke "Volkswagen Golf" — så
-   fritekstsøgningen skal bruge sælgernes egne ord, ellers rammer den forbi. */
-const BB_FREE_NAME = {"Volkswagen":"VW","Mercedes-Benz":"Mercedes","DS Automobiles":"DS"};
-
-/* Fritekst der identificerer bilen: mærke + model + evt. variantbetegnelse */
-function searchText(form, car) {
+/* Mærke og model som sti — Bilbasens egen modelside, som beviseligt lister
+   de rigtige biler. Er modelnavnet flere ord, er sti-formen usikker, og så
+   nøjes vi med mærket og lader modellen gå i fritekst. */
+function modelPath(car) {
+  const bs = car.bilbasen_brand_slug || brandSlug(car.brand);
+  const raw = car.bilbasen_model_slug || slugify(car.model);
+  const oneWord = raw && !raw.includes("_");
+  return { path: oneWord ? `${bs}/${raw}` : bs, modelInPath: !!oneWord };
+}
+/* Fritekst til sidst, og kun til det sti og filtre ikke kan udtrykke:
+   motor- eller udstyrsvarianten, og modelnavnet hvis det ikke kunne stå i stien. */
+function extraText(form, car, modelInPath) {
   // Brugerens variantønske må kun bruges hvis bilen faktisk fås i den variant —
   // ellers ender et "vRS"-ønske som fritekst på en Tesla og giver nul resultater.
   const wish = form.variantWish && String(car.variant||"").toLowerCase().includes(form.variantWish.toLowerCase())
     ? form.variantWish : "";
-  const brand = BB_FREE_NAME[car.brand] || car.brand;
-  return [brand, car.model, car.bilbasen_search_term || wish].filter(Boolean).join(" ").trim();
+  return [modelInPath ? "" : car.model, car.bilbasen_search_term || wish].filter(Boolean).join(" ").trim();
 }
 /* Filtreret søgning. Prisspændet er som standard bredt, fordi det ligger om et
    ESTIMAT — er estimatet et par procent ved siden af, og båndet smalt, får man
    nul resultater. Brugeren kan selv stramme det på kortet. */
 function buildBilbasenModelUrl(form, car, pct=15) {
+  const { path, modelInPath } = modelPath(car);
   const [lo,hi] = priceBand(car, form, pct);
   const p = baseParams(form, car, lo, hi, true);
   const fuels = (form.fuels||[]).length ? form.fuels : (car.fuel_type?[car.fuel_type]:[]);
   fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
   if (num(form.minHp)) p.set("hpfrom", num(form.minHp));
-  p.set("free", searchText(form, car));
-  return `${BILBASEN_BASE}?${p.toString()}`;
+  const term = extraText(form, car, modelInPath);
+  if (term) p.set("free", term);
+  return `${BILBASEN_BASE}/${path}?${p.toString()}`;
 }
 /* Alle eksemplarer af modellen, uden filtre. Bilbasens egen modelside er en
    almindelig, indekseret side — den giver altid resultater, hvis modellen
    overhovedet er til salg herhjemme. Sikkerhedsnettet når filtrene rammer nul. */
 function buildBilbasenPlainUrl(car) {
-  const bs = car.bilbasen_brand_slug || brandSlug(car.brand);
-  const raw = car.bilbasen_model_slug || slugify(car.model);
-  const oneWord = raw && !raw.includes("_");
-  return oneWord ? `${BILBASEN_BASE}/${bs}/${raw}` : `${BILBASEN_BASE}/${bs}`;
+  return `${BILBASEN_BASE}/${modelPath(car).path}`;
 }
 /* Bredere: samme klasse og budget, uden at binde sig til modellen */
 function buildBilbasenBroadUrl(form, car) {
@@ -232,19 +246,35 @@ function buildBilbasenBroadUrl(form, car) {
   return `${BILBASEN_BASE}?${p.toString()}`;
 }
 
-async function fetchOneCar(profile) {
-  const res = await fetch("/api/mistral", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ profile }),
-  });
-  if (!res.ok) throw new Error("API fejl " + res.status);
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  const s = text.indexOf("{"), e = text.lastIndexOf("}");
-  if (s === -1 || e === -1) throw new Error("Intet JSON");
-  const parsed = JSON.parse(text.slice(s, e+1));
-  if (!parsed.brand) throw new Error("Mangler brand");
-  return parsed;
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* Serveren svarer med struktureret JSON, så der er ikke længere noget at
+   parse ud af en tekststreng. Til gengæld kan et kald blive afvist midlertidigt
+   — for mange kald på én gang eller et hikke hos modellen — og det er værd at
+   prøve igen, før vi giver op og efterlader et tomt felt på skærmen. */
+async function fetchOneCar(profile, tries=3) {
+  let lastErr;
+  for (let attempt=0; attempt<tries; attempt++) {
+    if (attempt) await sleep(700 * Math.pow(2, attempt-1));   // 700 ms, 1,4 s
+    try {
+      const res = await fetch("/api/recommend", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ profile }),
+      });
+      if (res.status === 429 || res.status >= 500) {          // værd at prøve igen
+        lastErr = new Error("API " + res.status);
+        continue;
+      }
+      if (!res.ok) throw new Error("API " + res.status);       // 4xx: nytter ikke at gentage
+      const data = await res.json();
+      if (!data.car || !data.car.brand) throw new Error("Ufuldstændigt svar");
+      return data.car;
+    } catch (e) {
+      lastErr = e;
+      if (String(e.message).startsWith("API 4")) break;
+    }
+  }
+  throw lastErr || new Error("Ukendt fejl");
 }
 const carKey = c => c ? `${(c.brand||"").toLowerCase()} ${(c.model||"").toLowerCase()}`.trim() : "";
 
@@ -389,7 +419,30 @@ function H({children,size=1,style:extra}) {
   return <Tag style={{fontFamily:DISPLAY,fontSize:sizes[size],fontWeight:size===1?500:550,color:C.text,
     lineHeight:size===1?1.08:1.2,letterSpacing:"-0.015em",...extra}}>{children}</Tag>;
 }
-function Rule() { const C=useC(); return <hr style={{border:"none",borderTop:`1px solid ${C.border}`,margin:"clamp(48px,8vw,84px) 0"}}/>; }
+/* Bort med rudemotiv, lånt fra kanten af et persisk tæppe. Den fylder den
+   vandrette luft mellem sektionerne ud, uden at støje. */
+function Ornament({tight}) {
+  const C = useC();
+  const id = useRef("orn"+Math.random().toString(36).slice(2,7)).current;
+  return <div aria-hidden="true" style={{display:"flex",alignItems:"center",gap:16,
+    margin:tight?"clamp(28px,5vw,44px) 0":"clamp(48px,8vw,84px) 0"}}>
+    <span style={{flex:1,height:1,background:C.border}}/>
+    <svg width="86" height="14" viewBox="0 0 86 14" style={{flexShrink:0,opacity:.75}}>
+      <defs><g id={id}><path d="M7 1 L13 7 L7 13 L1 7 Z" fill="none" stroke={C.accent} strokeWidth="1.1"/></g></defs>
+      <use href={`#${id}`} x="0"/><use href={`#${id}`} x="18"/>
+      <circle cx="43" cy="7" r="3" fill={C.accent}/>
+      <use href={`#${id}`} x="54"/><use href={`#${id}`} x="72"/>
+    </svg>
+    <span style={{flex:1,height:1,background:C.border}}/>
+  </div>;
+}
+function Rule() { return <Ornament/>; }
+
+/* Smal, centreret spalte. Før stod teksten i venstre side med et stort
+   tomrum til højre — nu fordeles luften ligeligt om indholdet. */
+function Column({width="66ch",children,style}) {
+  return <div style={{maxWidth:width,marginLeft:"auto",marginRight:"auto",width:"100%",...style}}>{children}</div>;
+}
 
 /* ═════════════════════════════════════════════════════════════
    STEP-BJÆLKE — altid synlig, centreret, klikbar tilbage
@@ -480,22 +533,31 @@ function CarSilhouette({body,paint,glass,wheel,style}) {
    Wikipedia først og falder tilbage til engelsk. Svaret gemmes, så samme bil
    ikke slås op igen. */
 const wikiCache = new Map();
-async function fetchWikiImage(brand, model) {
-  const title = `${brand} ${model}`.trim();
-  if (wikiCache.has(title)) return wikiCache.get(title);
-  const ask = async host => {
+/* Vi SØGER frem for at slå en præcis titel op. Danske modelnavne rammer sjældent
+   en artikeltitel — "BMW 1-serie" hedder "BMW 1 Series" på engelsk — og et
+   præcist opslag fejler derfor lydløst. Søgningen finder artiklen alligevel. */
+async function fetchWikiImage(brand, model, hint) {
+  const query = (hint || `${brand} ${model}`).trim();
+  if (wikiCache.has(query)) return wikiCache.get(query);
+  const ask = async (host, q) => {
     const u = `https://${host}/w/api.php?action=query&format=json&formatversion=2&origin=*`
-      + `&prop=pageimages&piprop=thumbnail&pithumbsize=640&redirects=1&titles=${encodeURIComponent(title)}`;
+      + `&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=3&gsrnamespace=0`
+      + `&prop=pageimages&piprop=thumbnail&pithumbsize=800`;
     const r = await fetch(u);
     if (!r.ok) return null;
     const d = await r.json();
-    const page = d?.query?.pages?.[0];
-    return page && !page.missing ? (page.thumbnail?.source || null) : null;
+    const pages = d?.query?.pages || [];
+    // Søgningen sorterer efter relevans; tag det første træf der faktisk har et billede
+    const hit = [...pages].sort((a,b)=>(a.index||0)-(b.index||0)).find(p=>p.thumbnail?.source);
+    return hit ? hit.thumbnail.source : null;
   };
   let src = null;
-  try { src = await ask("da.wikipedia.org") || await ask("en.wikipedia.org"); }
-  catch (e) { src = null; }
-  wikiCache.set(title, src);
+  try {
+    src = await ask("en.wikipedia.org", query)          // engelsk har flest bilartikler med foto
+       || await ask("da.wikipedia.org", query)
+       || await ask("en.wikipedia.org", `${brand} ${model} car`);
+  } catch (e) { src = null; }
+  wikiCache.set(query, src);
   return src;
 }
 
@@ -508,11 +570,11 @@ function CarPhoto({car,tint}) {
   useEffect(()=>{
     if (studio) return;                       // studierendering vinder, når nøglen er sat
     let alive = true;
-    fetchWikiImage(car.brand, car.model).then(url=>{
+    fetchWikiImage(car.brand, car.model, car.wikipedia_title).then(url=>{
       if (alive && url) { setSrc(url); setIsPhoto(true); }
     });
     return ()=>{ alive = false; };
-  },[car.brand, car.model, studio]);
+  },[car.brand, car.model, car.wikipedia_title, studio]);
 
   const box = {height:210,background:C.panel,borderRadius:14,border:`1px solid ${C.border}`,
     display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",marginBottom:18,position:"relative"};
@@ -614,36 +676,37 @@ function DisclaimerBox() {
   </div>;
 }
 
-function CompareBox({a,b}) {
+const RANK_LABEL = ["Bedste match","Alternativ","Prisfornuftigt","Overraskende"];
+
+function CompareBox({cars}) {
   const C = useC();
-  if(!a||!b) return null;
+  if(!cars || cars.length<2) return null;
   const rows = [
-    ["Bil", `${a.brand} ${a.model}`, `${b.brand} ${b.model}`],
-    ["Variant", a.variant||"–", b.variant||"–"],
-    ["Pris brugt", fmtDKK(num(a.price_used_dkk)), fmtDKK(num(b.price_used_dkk))],
-    ["Drivmiddel", a.fuel_type||"–", b.fuel_type||"–"],
-    ["Karosseri", a.body_type||"–", b.body_type||"–"],
-    ["Effekt", a.hp?`${a.hp} hk`:"–", b.hp?`${b.hp} hk`:"–"],
-    ["Brændstof/md.", fmtDKK(num(a.fuel_cost_monthly)), fmtDKK(num(b.fuel_cost_monthly))],
-    ["Værdi efter 8 år", fmtDKK(num(a.resale?.y8)), fmtDKK(num(b.resale?.y8))],
+    ["Bil", c=>`${c.brand} ${c.model}`],
+    ["Variant", c=>c.variant||"–"],
+    ["Pris brugt", c=>fmtDKK(num(c.price_used_dkk))],
+    ["Drivmiddel", c=>c.fuel_type||"–"],
+    ["Karosseri", c=>c.body_type||"–"],
+    ["Effekt", c=>c.hp?`${c.hp} hk`:"–"],
+    ["Brændstof/md.", c=>fmtDKK(num(c.fuel_cost_monthly))],
+    ["Værdi efter 8 år", c=>fmtDKK(num(c.resale?.y8))],
   ];
   return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"22px",marginTop:16}}>
-    <H size={3} style={{marginBottom:6}}>Forskellen på de to</H>
-    {b.differs_from_primary && <p style={{color:C.muted,fontSize:16,lineHeight:1.65,marginBottom:14,maxWidth:"62ch"}}>{b.differs_from_primary}</p>}
+    <H size={3} style={{marginBottom:14}}>Forskellen på forslagene</H>
     <div style={{overflowX:"auto"}}>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:15.5,minWidth:420}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:15.5,minWidth:120+cars.length*150}}>
         <thead><tr>
           <th style={{textAlign:"left",padding:"8px 10px"}}></th>
-          <th style={{textAlign:"left",padding:"8px 10px",color:C.accent,fontSize:13.5,fontWeight:700}}>Bedste match</th>
-          <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontSize:13.5,fontWeight:700}}>Alternativ</th>
+          {cars.map((c,i)=><th key={i} style={{textAlign:"left",padding:"8px 10px",fontSize:13.5,fontWeight:700,
+            color:i===0?C.accent:C.muted,whiteSpace:"nowrap"}}>{RANK_LABEL[i]||`Forslag ${i+1}`}</th>)}
         </tr></thead>
         <tbody>
-          {rows.map(([l,x,y],i)=>{
-            const same = String(x)===String(y);
-            return <tr key={l} style={{background:i%2?C.panel:"transparent"}}>
-              <td style={{padding:"10px",color:C.muted,fontWeight:500,whiteSpace:"nowrap"}}>{l}</td>
-              <td style={{padding:"10px",color:same?C.muted:C.text,fontWeight:same?400:650}}>{x}</td>
-              <td style={{padding:"10px",color:same?C.muted:C.text,fontWeight:same?400:650}}>{y}</td>
+          {rows.map(([label,get],i)=>{
+            const vals = cars.map(get);
+            const allSame = vals.every(v=>String(v)===String(vals[0]));
+            return <tr key={label} style={{background:i%2?C.panel:"transparent"}}>
+              <td style={{padding:"10px",color:C.muted,fontWeight:500,whiteSpace:"nowrap"}}>{label}</td>
+              {vals.map((v,j)=><td key={j} style={{padding:"10px",color:allSame?C.muted:C.text,fontWeight:allSame?400:650}}>{v}</td>)}
             </tr>;
           })}
         </tbody>
@@ -652,14 +715,15 @@ function CompareBox({a,b}) {
   </div>;
 }
 
-function CarCard({car,form,onReject,isAlt,loading}) {
+function CarCard({car,form,onReject,rank=0,loading}) {
   const C = useC();
   const [expanded,setExpanded]=useState(false);
   const [pct,setPct]=useState(5);
   const [color,setColor]=useState(null);
+  const isAlt = rank>0;
   if(loading) return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:18,padding:"48px 24px",textAlign:"center"}}>
     <div style={{display:"inline-block",width:26,height:26,border:`2.5px solid ${C.accentSoft}`,borderTopColor:C.accent,borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
-    <div style={{color:C.muted,fontSize:15.5,marginTop:15}}>Finder {isAlt?"et alternativ":"det bedste match"}…</div>
+    <div style={{color:C.muted,fontSize:15.5,marginTop:15}}>Finder {(RANK_LABEL[rank]||"forslag").toLowerCase()}…</div>
   </div>;
   if(!car) return null;
   const price = num(car.price_used_dkk);
@@ -670,7 +734,7 @@ function CarCard({car,form,onReject,isAlt,loading}) {
 
   return <article style={{background:C.surface,border:`1px solid ${isAlt?C.border:C.accentBorder}`,borderRadius:18,overflow:"hidden",position:"relative",boxShadow:isAlt?C.shadow:C.shadowLift,animation:"fadeUp .35s ease"}}>
     <div style={{background:isAlt?C.panel:C.accentSoft,padding:"12px 18px",borderBottom:`1px solid ${isAlt?C.border:C.accentBorder}`,display:"flex",alignItems:"center",gap:11,flexWrap:"wrap"}}>
-      <span style={{color:isAlt?C.muted:C.accent,fontSize:13,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase"}}>{isAlt?"Alternativ":"Bedste match"}</span>
+      <span style={{color:isAlt?C.muted:C.accent,fontSize:13,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase"}}>{RANK_LABEL[rank]||`Forslag ${rank+1}`}</span>
       <span title="Forslaget er sammensat af vores AI ud fra dine svar" style={{background:C.surface,border:`1px solid ${C.border2}`,color:C.muted,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:999,letterSpacing:".07em"}}>AI-ANALYSE</span>
       {onReject && <button onClick={onReject} style={{marginLeft:"auto",background:"transparent",border:`1px solid ${C.border2}`,color:C.muted,borderRadius:999,padding:"7px 14px",fontSize:13.5,fontWeight:500,cursor:"pointer",minHeight:38,fontFamily:"inherit"}}>Vis et andet</button>}
     </div>
@@ -801,8 +865,7 @@ function buildLeadSummary({service,form,cards,excluded,contact,queue}) {
     ``, `── SØGEPROFIL ──`,
     summarizeForm(form),
     ``, `── ANBEFALINGER VIST ──`,
-    summarizeCar(cards[0],"Bedste match"),
-    summarizeCar(cards[1],"Alternativ"),
+    ...cards.map((c,i)=>summarizeCar(c, RANK_LABEL[i]||`Forslag ${i+1}`)).filter(t=>!t.endsWith("ingen")),
     ``, `── FRAVALGT UNDERVEJS ──`,
     [...(excluded[0]||[]),...(excluded[1]||[])].join(", ")||"ingen",
   ].join("\n");
@@ -934,19 +997,39 @@ function HelpSection({onPick}) {
   </section>;
 }
 
-function Results({cards,loadingA,loadingB,form,onReject,onRefresh,summary,onPickService}) {
+/* Et forslag der ikke kunne hentes. Vises som et rigtigt kort med en
+   forklaring, så pladsen ikke bare står tom. */
+function FailedCard({rank,onRetry}) {
   const C = useC();
+  return <div style={{background:C.surface,border:`1px dashed ${C.border2}`,borderRadius:18,
+    padding:"40px 24px",textAlign:"center"}}>
+    <div style={{color:C.text,fontSize:17,fontWeight:600,marginBottom:8}}>
+      {RANK_LABEL[rank]||`Forslag ${rank+1}`} kunne ikke hentes
+    </div>
+    <p style={{color:C.muted,fontSize:15.5,lineHeight:1.6,marginBottom:20,maxWidth:"34ch",marginLeft:"auto",marginRight:"auto"}}>
+      Det sker en sjælden gang, når der er tryk på. De øvrige forslag er ikke berørt.
+    </p>
+    <Btn kind="ghost" size="sm" onClick={onRetry}>Prøv dette forslag igen</Btn>
+  </div>;
+}
+
+function Results({cards,loading,failed,onRetry,form,onReject,onRefresh,summary,onPickService}) {
+  const C = useC();
+  const busy = loading.some(Boolean);
+  const shown = cards.filter(Boolean);
   return <div style={{animation:"fadeUp .4s ease"}}>
     {summary && <div style={{background:C.accentSoft,border:`1px solid ${C.accentBorder}`,borderRadius:16,padding:"18px 20px",marginBottom:24}}>
       <div style={{color:C.muted,fontSize:12,fontWeight:700,letterSpacing:".09em",textTransform:"uppercase",marginBottom:7}}>Din profil</div>
       <p style={{color:C.text,fontSize:16.5,lineHeight:1.65}}>{summary}</p>
     </div>}
-    {/* Side om side på skærme der har plads, ellers under hinanden */}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(370px,1fr))",gap:18,alignItems:"start"}}>
-      <CarCard car={cards[0]} form={form} isAlt={false} loading={loadingA} onReject={!loadingA?()=>onReject(0):null}/>
-      <CarCard car={cards[1]} form={form} isAlt={true}  loading={loadingB} onReject={!loadingB?()=>onReject(1):null}/>
+    {/* To ad gangen på skærme der har plads, ellers under hinanden */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,420px),1fr))",gap:18,alignItems:"start"}}>
+      {cards.map((car,i)=> failed[i] && !loading[i]
+        ? <FailedCard key={i} rank={i} onRetry={()=>onRetry(i)}/>
+        : <CarCard key={i} car={car} form={form} rank={i} loading={loading[i]}
+            onReject={!loading[i]&&car?()=>onReject(i):null}/>)}
     </div>
-    {!loadingA && !loadingB && <CompareBox a={cards[0]} b={cards[1]}/>}
+    {!busy && shown.length>1 && <CompareBox cars={shown}/>}
     <DisclaimerBox/>
     <HelpSection onPick={onPickService}/>
     <div style={{textAlign:"center",marginTop:34}}>
@@ -962,18 +1045,18 @@ function Landing({onStart,go}) {
   const C = useC();
   const steps = [
     ["Fortæl om hverdagen","Fem korte trin om familien, økonomien og hvordan bilen skal bruges. Ingen tekniske spørgsmål — vi spørger kun om det, du allerede kender svaret på."],
-    ["Få to forslag","Ét der passer bedst, og ét der bevidst er anderledes. Til hver bil forklarer vi hvorfor, hvad den koster at eje, og hvad FDM siger om den."],
+    ["Få fire bud","Ét der passer bedst, og tre der bevidst er anderledes — et alternativ, et prisfornuftigt og et overraskende. Til hver bil forklarer vi hvorfor."],
     ["Se dem til salg","Vi bygger søgningen på Bilbasen for dig — rigtigt mærke, rigtig årgang, rigtigt prisleje. Du skal bare klikke."],
   ];
   return <div style={{animation:"fadeUp .4s ease"}}>
-    <section style={{padding:"clamp(40px,7vw,84px) 0 clamp(30px,5vw,54px)",maxWidth:"70ch"}}>
+    <section style={{padding:"clamp(40px,7vw,84px) 0 clamp(30px,5vw,54px)",maxWidth:"70ch",marginLeft:"auto",marginRight:"auto",textAlign:"center"}}>
       <p style={{color:C.accent,fontSize:15,fontWeight:600,letterSpacing:".04em",marginBottom:20}}>Uafhængig bilrådgivning · Danmark</p>
       <H size={1} style={{marginBottom:24}}>Den rigtige bil.<br/>Uden at være bilnørd.</H>
-      <p style={{color:C.muted,fontSize:"clamp(17px,2.2vw,20px)",lineHeight:1.65,marginBottom:34,maxWidth:"54ch"}}>
-        Vi spørger om din hverdag — ikke om hestekræfter og motorkoder — og finder to biler,
+      <p style={{color:C.muted,fontSize:"clamp(17px,2.2vw,20px)",lineHeight:1.65,marginBottom:34,maxWidth:"54ch",marginLeft:"auto",marginRight:"auto"}}>
+        Vi spørger om din hverdag — ikke om hestekræfter og motorkoder — og finder fire biler,
         der passer til den. Du får at vide hvorfor, hvad de koster at eje, og hvor de er til salg.
       </p>
-      <div style={{display:"flex",gap:13,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:13,flexWrap:"wrap",alignItems:"center",justifyContent:"center"}}>
         <Btn size="lg" onClick={onStart}>Find min bil</Btn>
         <Btn size="lg" kind="quiet" onClick={()=>go("pricing")}>Se hvad det koster →</Btn>
       </div>
@@ -988,11 +1071,13 @@ function Landing({onStart,go}) {
     <Rule/>
 
     <section>
-      <H size={2} style={{marginBottom:12}}>Sådan foregår det</H>
-      <p style={{color:C.muted,fontSize:17,lineHeight:1.7,marginBottom:40,maxWidth:"56ch"}}>
-        Tre trin. Du kan altid gå tilbage og rette undervejs.
-      </p>
-      <div style={{display:"flex",flexDirection:"column",gap:2}}>
+      <div style={{textAlign:"center",marginBottom:40}}>
+        <H size={2} style={{marginBottom:12}}>Sådan foregår det</H>
+        <p style={{color:C.muted,fontSize:17,lineHeight:1.7,maxWidth:"56ch",marginLeft:"auto",marginRight:"auto"}}>
+          Tre trin. Du kan altid gå tilbage og rette undervejs.
+        </p>
+      </div>
+      <Column width="72ch" style={{display:"flex",flexDirection:"column",gap:2}}>
         {steps.map(([t,d],i)=>
           /* Fast bredde på tal-kolonnen, så overskrifterne flugter på tværs af rækkerne */
           <div key={t} style={{display:"grid",gridTemplateColumns:"clamp(44px,7vw,72px) 1fr",gap:"clamp(14px,3vw,32px)",
@@ -1005,12 +1090,12 @@ function Landing({onStart,go}) {
               <p style={{color:C.muted,fontSize:16.5,lineHeight:1.75,maxWidth:"58ch"}}>{d}</p>
             </div>
           </div>)}
-      </div>
+      </Column>
     </section>
 
     <Rule/>
 
-    <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:"clamp(24px,4vw,44px)"}}>
+    <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:"clamp(24px,4vw,44px)",textAlign:"center"}}>
       {[["Vi sælger ikke biler","Ingen forhandleraftaler og ingen provision. Vi har intet at tjene på, hvilken bil du ender med."],
         ["Målt på danske forhold","Vi vægter FDM højest, fordi deres tests og medlemsundersøgelser er lavet ud fra danske priser, afgifter og veje."],
         ["Skrevet til mennesker","Ingen forkortelser, ingen fagsprog. Er der noget du ikke forstår, er det vores fejl — så skriv til os."]]
@@ -1037,7 +1122,7 @@ function Landing({onStart,go}) {
    ═════════════════════════════════════════════════════════════ */
 function AboutPage({onStart,go}) {
   const C = useC();
-  return <article style={{animation:"fadeUp .3s ease",maxWidth:"66ch"}}>
+  return <article style={{animation:"fadeUp .3s ease",maxWidth:"66ch",marginLeft:"auto",marginRight:"auto"}}>
     <p style={{color:C.accent,fontSize:15,fontWeight:600,letterSpacing:".04em",marginBottom:20,paddingTop:"clamp(20px,4vw,40px)"}}>Om os</p>
     <H size={1} style={{marginBottom:30,fontSize:"clamp(30px,5vw,44px)"}}>
       At købe bil burde ikke kræve, at man kan lide biler.
@@ -1097,7 +1182,7 @@ function AboutPage({onStart,go}) {
 function PricingPage({onStart,onPick}) {
   const C = useC();
   return <div style={{animation:"fadeUp .3s ease"}}>
-    <div style={{maxWidth:"58ch",paddingTop:"clamp(20px,4vw,40px)"}}>
+    <div style={{maxWidth:"62ch",marginLeft:"auto",marginRight:"auto",paddingTop:"clamp(20px,4vw,40px)"}}>
       <p style={{color:C.accent,fontSize:15,fontWeight:600,letterSpacing:".04em",marginBottom:20}}>Priser</p>
       <H size={1} style={{marginBottom:24,fontSize:"clamp(30px,5vw,44px)"}}>Selve søgningen er gratis.</H>
       <p style={{color:C.muted,fontSize:"clamp(17px,2vw,19px)",lineHeight:1.75,marginBottom:16}}>
@@ -1114,7 +1199,7 @@ function PricingPage({onStart,onPick}) {
       display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
       <div style={{flex:1,minWidth:220}}>
         <h3 style={{fontFamily:DISPLAY,fontSize:23,fontWeight:550,color:C.text,marginBottom:7}}>Brug af siden</h3>
-        <p style={{color:C.muted,fontSize:16,lineHeight:1.7}}>Bilforslag, begrundelser, ejerøkonomi, farver og søgninger på Bilbasen. Så mange gange du vil.</p>
+        <p style={{color:C.muted,fontSize:16,lineHeight:1.7}}>Fire bilforslag, begrundelser, ejerøkonomi, farver og søgninger på Bilbasen. Så mange gange du vil.</p>
       </div>
       <div style={{textAlign:"right"}}>
         <div style={{fontFamily:DISPLAY,fontSize:38,fontWeight:550,color:C.text,lineHeight:1}}>Gratis</div>
@@ -1152,7 +1237,7 @@ function ContactPage() {
   const set = k => v => setF(x=>({...x,[k]:v}));
   const valid = f.name.trim() && /\S+@\S+\.\S+/.test(f.email) && f.message.trim();
   const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(f.subject||`Henvendelse fra ${f.name||"besøgende"}`)}&body=${encodeURIComponent(`${f.message}\n\n— ${f.name}\n${f.email}`)}`;
-  return <div style={{animation:"fadeUp .3s ease",maxWidth:"58ch",paddingTop:"clamp(20px,4vw,40px)"}}>
+  return <div style={{animation:"fadeUp .3s ease",maxWidth:"60ch",marginLeft:"auto",marginRight:"auto",paddingTop:"clamp(20px,4vw,40px)"}}>
     <p style={{color:C.accent,fontSize:15,fontWeight:600,letterSpacing:".04em",marginBottom:20}}>Kontakt</p>
     <H size={1} style={{marginBottom:22,fontSize:"clamp(30px,5vw,44px)"}}>Skriv til os</H>
     <p style={{color:C.muted,fontSize:17.5,lineHeight:1.75,marginBottom:34}}>
@@ -1193,11 +1278,11 @@ function App() {
   const [form,setForm] = useState({adults:"2",children:"0",childAges:"",region:"",budgetType:"kontant",budget:"",monthly:"",yearMin:"",kmMax:"",minHp:"",dailyKm:"",driveType:"",extras:"",character:"",variantWish:"",bodies:[],fuels:[],brands:[],excludeBrands:[],priorities:[],transmission:"",towbar:""});
   const [showResults,setShowResults] = useState(false);
   const [summary,setSummary] = useState("");
-  const [cards,setCards] = useState([null,null]);
-  const [loadingA,setLoadingA] = useState(false);
-  const [loadingB,setLoadingB] = useState(false);
+  const [cards,setCards] = useState([null,null,null,null]);
+  const [loading,setLoading] = useState([false,false,false,false]);
+  const [failed,setFailed] = useState([false,false,false,false]);
   const [error,setError] = useState("");
-  const [excluded,setExcluded] = useState([[],[]]);
+  const [excluded,setExcluded] = useState([[],[],[],[]]);
   const [lead,setLead] = useState(null);
   const set = k => v => setForm(f=>({...f,[k]:v}));
 
@@ -1215,51 +1300,89 @@ function App() {
     return true;
   };
 
-  /* Sekventiel søgning, så alternativet kender forslag 1 og ikke gentager det */
+  /* Forslag 1 hentes først og vises med det samme; de tre øvrige hentes
+     derefter parallelt, hver med sin vinkel. Et kort der fejler eller kommer
+     tilbage som en dublet FORSVINDER IKKE — pladsen bliver stående med en
+     forklaring og en prøv-igen-knap, så man ikke sidder med to kort og undrer
+     sig over hvor de andre to blev af. */
+  async function fetchSlot(rank, avoid, avoidCar) {
+    let car = await fetchOneCar(buildProfile(form, rank, avoid, avoidCar));
+    return car;
+  }
+
   async function runSearch(excl) {
     setShowResults(true); setMaxReached(5);
-    setCards([null,null]); setLoadingA(true); setLoadingB(true); setError("");
+    setCards([null,null,null,null]);
+    setLoading([true,true,true,true]);
+    setFailed([false,false,false,false]);
+    setError("");
     top();
+
     let first = null;
     try {
-      first = await fetchOneCar(buildProfile(form,1,excl[0]));
-      setCards(c=>[first,c[1]]);
-      setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I også et bevidst anderledes alternativ.`);
-    } catch(e) { setError("Vi kunne ikke hente en anbefaling lige nu. Prøv igen om et øjeblik."); }
-    setLoadingA(false);
+      first = await fetchSlot(1, excl[0], "");
+      setCards(c=>[first,c[1],c[2],c[3]]);
+      setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I tre bevidst anderledes bud.`);
+    } catch(e) {
+      setFailed(f=>[true,f[1],f[2],f[3]]);
+    }
+    setLoading(l=>[false,l[1],l[2],l[3]]);
 
     const firstName = first ? `${first.brand} ${first.model}` : "";
+    const taken = new Set([carKey(first)].filter(Boolean));
+
+    await Promise.all([2,3,4].map(async rank => {
+      const idx = rank-1;
+      const avoid = [...excl[idx], ...excl[0], firstName].filter(Boolean);
+      try {
+        let car = await fetchSlot(rank, avoid, firstName);
+        // Samme bil som et kort vi allerede viser? Bed om en anden, én gang.
+        if (taken.has(carKey(car))) {
+          car = await fetchSlot(rank, [...avoid, `${car.brand} ${car.model}`], firstName);
+        }
+        if (taken.has(carKey(car))) throw new Error("Kun dubletter");
+        taken.add(carKey(car));
+        setCards(c=>c.map((v,i)=>i===idx?car:v));
+      } catch(e) {
+        setFailed(f=>f.map((v,i)=>i===idx?true:v));
+      } finally {
+        setLoading(l=>l.map((v,i)=>i===idx?false:v));
+      }
+    }));
+  }
+
+  /* Prøv ét enkelt felt igen — bruges af knappen på et kort der fejlede */
+  async function retrySlot(idx) {
+    const others = cards.filter((c,i)=>i!==idx && c).map(c=>`${c.brand} ${c.model}`);
+    setFailed(f=>f.map((v,i)=>i===idx?false:v));
+    setLoading(l=>l.map((v,i)=>i===idx?true:v));
     try {
-      const avoid = [...excl[1], ...excl[0], firstName].filter(Boolean);
-      let second = await fetchOneCar(buildProfile(form,2,avoid,firstName));
-      if (first && carKey(second)===carKey(first)) {          // samme bil — prøv én gang til
-        second = await fetchOneCar(buildProfile(form,2,[...avoid,`${second.brand} ${second.model}`],firstName));
-      }
-      if (first && carKey(second)===carKey(first)) {
-        setCards(c=>[c[0],null]);
-        setError("Vi kunne ikke finde et reelt anderledes alternativ til din profil — prøv at udvide budget, mærker eller karosseri.");
-      } else {
-        setCards(c=>[c[0],second]);
-      }
-    } catch(e) { setError(prev => prev || "Vi kunne ikke hente det alternative forslag. Prøv igen om et øjeblik."); }
-    setLoadingB(false);
+      const avoid = [...excluded[idx], ...others].filter(Boolean);
+      const car = await fetchSlot(idx+1, avoid, others[0]||"");
+      setCards(c=>c.map((v,i)=>i===idx?car:v));
+    } catch(e) {
+      setFailed(f=>f.map((v,i)=>i===idx?true:v));
+    }
+    setLoading(l=>l.map((v,i)=>i===idx?false:v));
   }
 
   async function handleReject(idx) {
     const rejected = cards[idx] ? `${cards[idx].brand} ${cards[idx].model}` : "";
-    const other = cards[idx===0?1:0];
+    const others = cards.filter((c,i)=>i!==idx && c).map(c=>`${c.brand} ${c.model}`);
     const newExcl = excluded.map((e,i)=>i===idx?[...e,rejected]:e);
     setExcluded(newExcl); setError("");
-    if(idx===0){setLoadingA(true);setCards(c=>[null,c[1]]);} else {setLoadingB(true);setCards(c=>[c[0],null]);}
+    setLoading(l=>l.map((v,i)=>i===idx?true:v));
+    setCards(c=>c.map((v,i)=>i===idx?null:v));
     try {
-      const avoid = [...newExcl[idx], other?`${other.brand} ${other.model}`:""].filter(Boolean);
-      let car = await fetchOneCar(buildProfile(form, idx===0?1:2, avoid, other?`${other.brand} ${other.model}`:""));
-      if (other && carKey(car)===carKey(other)) {
-        car = await fetchOneCar(buildProfile(form, idx===0?1:2, [...avoid,`${car.brand} ${car.model}`], `${other.brand} ${other.model}`));
+      const avoid = [...newExcl[idx], ...others].filter(Boolean);
+      let car = await fetchOneCar(buildProfile(form, idx+1, avoid, others[0]||""));
+      // Kom den samme bil igen som et af de øvrige kort, så prøv én gang til
+      if (others.includes(`${car.brand} ${car.model}`)) {
+        car = await fetchOneCar(buildProfile(form, idx+1, [...avoid,`${car.brand} ${car.model}`], others[0]||""));
       }
-      if(idx===0) setCards(c=>[car,c[1]]); else setCards(c=>[c[0],car]);
-    } catch { setError("Vi kunne ikke hente et nyt forslag. Prøv igen om et øjeblik."); }
-    if(idx===0) setLoadingA(false); else setLoadingB(false);
+      setCards(c=>c.map((v,i)=>i===idx?car:v));
+    } catch { setFailed(f=>f.map((v,i)=>i===idx?true:v)); }
+    setLoading(l=>l.map((v,i)=>i===idx?false:v));
   }
 
   const stepIdx = showResults ? 5 : step;
@@ -1359,16 +1482,16 @@ function App() {
             {step>0 ? <Btn kind="ghost" onClick={()=>goStep(step-1)}>← Tilbage</Btn> : <span/>}
             {step<4
               ? <Btn onClick={next} disabled={!canNext(step)} size="lg">Næste →</Btn>
-              : <Btn onClick={()=>runSearch([[],[]])} size="lg">Find vores bil</Btn>}
+              : <Btn onClick={()=>runSearch([[],[],[],[]])} size="lg">Find vores bil</Btn>}
           </div>
           {!canNext(step) && <p style={{color:C.muted,fontSize:15,textAlign:"right",marginTop:11}}>Udfyld felterne ovenfor for at komme videre.</p>}
         </>}
 
         {page==="finder" && showResults && <div style={{paddingTop:30}}><Results
-          cards={cards} loadingA={loadingA} loadingB={loadingB}
+          cards={cards} loading={loading} failed={failed} onRetry={retrySlot}
           form={form} summary={summary} onReject={handleReject}
           onPickService={s=>setLead(s)}
-          onRefresh={()=>{setShowResults(false);setCards([null,null]);setSummary("");setExcluded([[],[]]);setStep(4);top();}}
+          onRefresh={()=>{setShowResults(false);setCards([null,null,null,null]);setFailed([false,false,false,false]);setSummary("");setExcluded([[],[],[],[]]);setStep(4);top();}}
         /></div>}
 
         {error && <p role="alert" style={{color:C.bad,fontSize:16,textAlign:"center",marginTop:20,background:C.surface,border:`1px solid ${C.accentBorder}`,borderRadius:14,padding:"14px 18px"}}>{error}</p>}
