@@ -154,6 +154,7 @@ efter ændringer i skemaet; den fanger det.
   fdm.dk afviser automatiseret adgang.
 - **Wikipedia-billederne.** Koden og begge fallback-veje er testet, men
   Wikipedias faktiske svar er ikke, af samme grund.
-- **`cartypes`-værdierne til Bilbasen.** `MPV` er bekræftet mod en rigtig
-  URL. `Mikro` og `CUV` er ikke — de følger Bilbasens viste kategorinavne og
-  står i `BB_BODY`. De bruges kun i den brede søgning, ikke i hovedknappen.
+- **`cartypes`-værdierne til Bilbasen.** Kun værdier vi har belæg for står i
+  `BB_BODY`. Mikro og Crossover (CUV) er udeladt, fordi deres filterværdi ikke
+  er bekræftet — vælger man dem, udelades karosserifilteret fra den brede
+  søgning i stedet for at sende et gæt. Kan værdierne bekræftes, tilføjes de.
