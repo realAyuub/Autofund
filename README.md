@@ -69,8 +69,15 @@ trin hvis et led ikke svarer:
    søgning frem for et præcist titelopslag. Danske modelnavne rammer sjældent
    en artikeltitel: "BMW 1-serie" hedder "BMW 1 Series" på engelsk. AI'en
    leverer desuden et `wikipedia_title` som første gæt. Gratis, ingen nøgle.
-3. **Tegning** — en silhuet i tre karosseriformer, så en stationcar ikke
-   tegnes som en SUV.
+3. **Tegning** — en silhuet per karosseritype. De samme tegninger bruges som
+   ikoner, når man vælger karosseri, så man ikke skal vide hvad en MPV er.
+
+**Billedet kontrolleres.** Vi kan ikke se hvad der er på et foto, men vi kan
+se hvilken artikel det kommer fra. Et foto godtages kun hvis artiklens titel
+indeholder både mærket og modellen — ellers vises tegningen frem for et
+billede af en anden bil. Findes der en artikel om netop varianten, foretrækkes
+den, fordi en GTI ser markant anderledes ud end en almindelig Golf. Artiklens
+navn står i hjørnet af billedet, så man selv kan se hvad man kigger på.
 
 ## Bilbasen-søgninger
 
@@ -95,10 +102,10 @@ Appen byggede tidligere den sidste form. Derfor:
 
 Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*.
 
-## Fire forslag ad gangen
+## To forslag ad gangen
 
-Forslag 1 hentes først og vises med det samme. De tre øvrige hentes derefter
-parallelt, hver med sin vinkel (alternativ, prisfornuftigt, overraskende).
+Forslag 1 hentes først og vises med det samme. Alternativet hentes derefter og
+skal være et andet mærke og enten anden karosseriform eller andet drivmiddel.
 
 Et kald der bliver afvist prøves automatisk igen to gange med stigende
 ventetid. Lykkes det stadig ikke — eller kommer den samme bil igen som et af
