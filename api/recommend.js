@@ -132,13 +132,17 @@ module.exports = async function handler(req, res) {
     if (!process.env.ANTHROPIC_API_KEY) {
       console.error("MISSING_ENV: ANTHROPIC_API_KEY er ikke sat");
       res.statusCode = 500;
-      return res.end(JSON.stringify({ error: "MISSING_ENV", message: "ANTHROPIC_API_KEY er ikke sat på serveren" }));
+      return res.end(JSON.stringify({ error: "MISSING_ENV", hint: "API-nøglen mangler på serveren. Sæt ANTHROPIC_API_KEY i Vercel og deploy igen." }));
     }
 
     const client = new Anthropic();
     const message = await client.messages.create({
       model: MODEL,
-      max_tokens: 4000,
+      // Tænkning er slået til som standard på Opus 5, og de tokens tæller med i
+      // det SAMME budget som svaret. Et lavt loft betyder derfor ikke "et kort
+      // svar" — det betyder at JSON'en bliver klippet over midt i, og så er
+      // hele svaret ubrugeligt. Skemaet her er stort, så der skal være luft.
+      max_tokens: 16000,
       // Systemprompten er ens for alle fire kald i en søgning — cachet er den
       // næsten gratis fra kald nummer to.
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
@@ -152,7 +156,14 @@ module.exports = async function handler(req, res) {
     if (message.stop_reason === "refusal") {
       console.error("REFUSAL", message.stop_details);
       res.statusCode = 422;
-      return res.end(JSON.stringify({ error: "REFUSAL" }));
+      return res.end(JSON.stringify({ error: "REFUSAL", hint: "Modellen afviste forespørgslen." }));
+    }
+    // Ramte vi loftet, er JSON'en klippet over. Sig det tydeligt frem for at
+    // lade det ligne en tilfældig parsefejl.
+    if (message.stop_reason === "max_tokens") {
+      console.error("MAX_TOKENS — svaret blev klippet over. Hæv max_tokens.");
+      res.statusCode = 502;
+      return res.end(JSON.stringify({ error: "MAX_TOKENS", hint: "Svaret blev for langt og blev klippet over." }));
     }
 
     const text = (message.content || [])
@@ -164,11 +175,11 @@ module.exports = async function handler(req, res) {
     catch (e) {
       console.error("Kunne ikke parse svaret som JSON:", text.slice(0, 400));
       res.statusCode = 502;
-      return res.end(JSON.stringify({ error: "BAD_JSON" }));
+      return res.end(JSON.stringify({ error: "BAD_JSON", hint: "Svaret kunne ikke læses." }));
     }
     if (!car || !car.brand) {
       res.statusCode = 502;
-      return res.end(JSON.stringify({ error: "MANGLER_BRAND" }));
+      return res.end(JSON.stringify({ error: "MANGLER_BRAND", hint: "Svaret manglede felter." }));
     }
 
     res.statusCode = 200;
@@ -178,20 +189,20 @@ module.exports = async function handler(req, res) {
     if (err instanceof Anthropic.RateLimitError) {
       console.error("Rate limit:", err.message);
       res.statusCode = 429;
-      return res.end(JSON.stringify({ error: "RATE_LIMIT" }));
+      return res.end(JSON.stringify({ error: "RATE_LIMIT", hint: "For mange kald på kort tid." }));
     }
     if (err instanceof Anthropic.AuthenticationError) {
       console.error("Ugyldig API-nøgle");
       res.statusCode = 500;
-      return res.end(JSON.stringify({ error: "BAD_KEY", message: "ANTHROPIC_API_KEY blev afvist" }));
+      return res.end(JSON.stringify({ error: "BAD_KEY", hint: "API-nøglen blev afvist. Tjek nøglen og at der er saldo på kontoen." }));
     }
     if (err instanceof Anthropic.APIError) {
       console.error("Claude API-fejl", err.status, err.message);
       res.statusCode = err.status >= 500 ? 502 : 400;
-      return res.end(JSON.stringify({ error: "CLAUDE_ERROR", status: err.status }));
+      return res.end(JSON.stringify({ error: "CLAUDE_ERROR", status: err.status, hint: `Claude svarede med fejl ${err.status}.` }));
     }
     console.error("Uventet fejl i api/recommend:", err);
     res.statusCode = 500;
-    return res.end(JSON.stringify({ error: "SERVER_EXCEPTION" }));
+    return res.end(JSON.stringify({ error: "SERVER_EXCEPTION", hint: "Uventet fejl på serveren." }));
   }
 };

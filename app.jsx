@@ -173,76 +173,89 @@ function yearBand(car, form) {
   if (userMin) from = Math.max(from||userMin, userMin);
   return [from, to];
 }
-/* Søgningen bygges i den rækkefølge, der snævrer mest ind først og gør mindst
-   skade hvis et led rammer forbi:
-     1. mærke og model som sti  — /brugt/bil/vw/golf
-     2. årgang                  — yearfrom / yearto
-     3. prisklasse              — pricefrom / priceto
-     4. brændstof og km         — fuel / mileageto
-     5. fritekst til SIDST      — free, kun til varianter som "vRS"
-   Sti og parametre virker sammen; det er bekræftet af rigtige Bilbasen-URL'er
-   som /brugt/varebil-inkl-moms/reg-østjylland?IncludeLeasing=True&Free=…
-   Fritekst bruges bevidst ikke til mærke og model — det er sti'ens opgave, og
-   dobbeltbinding er den hurtigste vej til nul resultater. */
-function baseParams(form, car, priceLo, priceHi, yearTo) {
-  const p = new URLSearchParams();
-  const [yf,yt] = yearBand(car||{}, form);
-  if (yf) p.set("yearfrom", yf);
-  // Kun sæt yearto når vi vil snævre ind. Generationens slutår udelukker ellers
-  // nyere facelift-årgange af samme model helt unødigt.
-  if (yearTo && yt) p.set("yearto", yt);
-  if (priceLo) p.set("pricefrom", priceLo);
-  if (priceHi) p.set("priceto", priceHi);
-  if (num(form.kmMax)) p.set("mileageto", num(form.kmMax));
-  p.set("includeleasing", "false");
-  return p;
-}
-/* Mærke og model som sti — Bilbasens egen modelside, som beviseligt lister
-   de rigtige biler. Er modelnavnet flere ord, er sti-formen usikker, og så
-   nøjes vi med mærket og lader modellen gå i fritekst. */
+/* HVAD VI VED OM BILBASENS URL'ER
+   Deres domæne er spærret fra byggemiljøet, så alt herunder er udledt af
+   rigtige Bilbasen-sider som søgemaskiner har indekseret. Titlen på en
+   Bilbasen-side indeholder antallet af biler, og det er derfor muligt at se
+   hvilke former der giver resultater:
+
+     Sti alene — VIRKER, med tal i titlen:
+       /brugt/bil/skoda/octavia        "Skoda Octavia - 24 brugte til salg"
+       /brugt/bil/vw/ps-golf           "golf | VW - 613 brugte til salg"
+       /brugt/bil/skoda/octavia/ps-vrs "vrs | Skoda Octavia - se brugte til salg"
+
+     Flad form med parametre — VIRKER, med tal i titlen:
+       /brugt/bil?free=aut&fuel=1&priceto=75000   "aut | Benzin - 2071 brugte"
+
+     Sti PLUS parametre — INTET belæg for at det virker.
+   Det sidste var præcis det appen byggede, og det er den mest sandsynlige
+   grund til at søgningerne ikke gav biler. Vi bruger derfor kun de to former
+   vi har set virke: stien til hovedknappen, den flade form til den snævre. */
+
+/* Fritekst i sti-form: små bogstaver med underscore, som Bilbasen selv gør
+   (ps-skoda_octavia_rs, ps-vrs, ps-vw_golf_benzin). */
+// Punktummer fjernes frem for at blive til skilletegn: "R.S. Trophy" skal
+// blive til rs_trophy, ikke r_s_trophy.
+const psTerm = t => slugify(String(t).replace(/\./g, ""), "_");
+
+/* Mærke og model som sti. Er modelnavnet flere ord, er sti-formen usikker,
+   og så nøjes vi med mærket og lader modellen gå i fritekst. */
 function modelPath(car) {
   const bs = car.bilbasen_brand_slug || brandSlug(car.brand);
   const raw = car.bilbasen_model_slug || slugify(car.model);
   const oneWord = raw && !raw.includes("_");
   return { path: oneWord ? `${bs}/${raw}` : bs, modelInPath: !!oneWord };
 }
-/* Fritekst til sidst, og kun til det sti og filtre ikke kan udtrykke:
-   motor- eller udstyrsvarianten, og modelnavnet hvis det ikke kunne stå i stien. */
-function extraText(form, car, modelInPath) {
-  // Brugerens variantønske må kun bruges hvis bilen faktisk fås i den variant —
-  // ellers ender et "vRS"-ønske som fritekst på en Tesla og giver nul resultater.
+/* Brugerens variantønske må kun bruges hvis bilen faktisk fås i den variant —
+   ellers ender et "vRS"-ønske som fritekst på en Tesla og giver nul resultater. */
+function variantTerm(form, car) {
   const wish = form.variantWish && String(car.variant||"").toLowerCase().includes(form.variantWish.toLowerCase())
     ? form.variantWish : "";
-  return [modelInPath ? "" : car.model, car.bilbasen_search_term || wish].filter(Boolean).join(" ").trim();
+  return car.bilbasen_search_term || wish || "";
 }
-/* Filtreret søgning. Prisspændet er som standard bredt, fordi det ligger om et
-   ESTIMAT — er estimatet et par procent ved siden af, og båndet smalt, får man
-   nul resultater. Brugeren kan selv stramme det på kortet. */
-function buildBilbasenModelUrl(form, car, pct=15) {
+
+/* HOVEDKNAPPEN — kun sti, ingen parametre. Denne form er set give rigtige
+   biler, og den kan ikke ramme nul på grund af et filter der er sat forkert.
+   Variant og flerordsmodel hænges på som ps-fritekst, hvilket også er set virke. */
+function buildBilbasenModelUrl(form, car) {
   const { path, modelInPath } = modelPath(car);
+  const extra = [modelInPath ? "" : car.model, variantTerm(form, car)]
+    .filter(Boolean).join(" ").trim();
+  return extra ? `${BILBASEN_BASE}/${path}/ps-${psTerm(extra)}` : `${BILBASEN_BASE}/${path}`;
+}
+
+/* DEN SNÆVRE SØGNING — flad form med filtre, som vi har set give resultater.
+   Årgang og prisklasse med, så man kan komme tættere på, hvis modelsiden
+   giver for mange biler. */
+function buildBilbasenFilteredUrl(form, car, pct=15) {
+  const p = new URLSearchParams();
+  p.set("free", [car.brand, car.model, variantTerm(form, car)].filter(Boolean).join(" ").trim());
+  const [yf,yt] = yearBand(car, form);
+  if (yf) p.set("yearfrom", yf);
+  if (yt) p.set("yearto", yt);
   const [lo,hi] = priceBand(car, form, pct);
-  const p = baseParams(form, car, lo, hi, true);
+  if (lo) p.set("pricefrom", lo);
+  if (hi) p.set("priceto", hi);
+  if (num(form.kmMax)) p.set("mileageto", num(form.kmMax));
   const fuels = (form.fuels||[]).length ? form.fuels : (car.fuel_type?[car.fuel_type]:[]);
   fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
-  if (num(form.minHp)) p.set("hpfrom", num(form.minHp));
-  const term = extraText(form, car, modelInPath);
-  if (term) p.set("free", term);
-  return `${BILBASEN_BASE}/${path}?${p.toString()}`;
+  p.set("includeleasing", "false");
+  return `${BILBASEN_BASE}?${p.toString()}`;
 }
-/* Alle eksemplarer af modellen, uden filtre. Bilbasens egen modelside er en
-   almindelig, indekseret side — den giver altid resultater, hvis modellen
-   overhovedet er til salg herhjemme. Sikkerhedsnettet når filtrene rammer nul. */
-function buildBilbasenPlainUrl(car) {
-  return `${BILBASEN_BASE}/${modelPath(car).path}`;
-}
+
 /* Bredere: samme klasse og budget, uden at binde sig til modellen */
 function buildBilbasenBroadUrl(form, car) {
+  const p = new URLSearchParams();
   const budget = num(form.budget) || (num(car&&car.price_used_dkk) ? Math.round(num(car.price_used_dkk)*1.15) : null);
-  const p = baseParams(form, car, null, budget, false);
+  if (budget) p.set("priceto", budget);
+  const [yf] = yearBand(car||{}, form);
+  if (yf) p.set("yearfrom", yf);
+  if (num(form.kmMax)) p.set("mileageto", num(form.kmMax));
   const fuels = (form.fuels||[]).length ? form.fuels : (car&&car.fuel_type?[car.fuel_type]:[]);
   fuels.forEach(f=>{ if(BB_FUEL[f]) p.append("fuel", BB_FUEL[f]); });
   const bodies = (form.bodies||[]).length ? form.bodies : (car&&car.body_type?[car.body_type]:[]);
   bodies.forEach(b=>{ if(BB_BODY[b]) p.append("cartypes", BB_BODY[b]); });
+  p.set("includeleasing", "false");
   return `${BILBASEN_BASE}?${p.toString()}`;
 }
 
@@ -261,17 +274,24 @@ async function fetchOneCar(profile, tries=3) {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ profile }),
       });
-      if (res.status === 429 || res.status >= 500) {          // værd at prøve igen
-        lastErr = new Error("API " + res.status);
-        continue;
+      if (!res.ok) {
+        // Serveren forklarer hvad der gik galt — den forklaring skal helt op
+        // på skærmen, så en manglende API-nøgle ikke ligner et tilfældigt hikke.
+        let hint = "";
+        try { hint = (await res.json()).hint || ""; } catch (e) {}
+        const err = new Error(hint || ("Serverfejl " + res.status));
+        err.hint = hint;
+        err.permanent = res.status >= 400 && res.status < 500 && res.status !== 429;
+        lastErr = err;
+        if (err.permanent) break;                 // nytter ikke at gentage
+        continue;                                  // 429 og 5xx: prøv igen
       }
-      if (!res.ok) throw new Error("API " + res.status);       // 4xx: nytter ikke at gentage
       const data = await res.json();
-      if (!data.car || !data.car.brand) throw new Error("Ufuldstændigt svar");
+      if (!data.car || !data.car.brand) throw new Error("Ufuldstændigt svar fra serveren");
       return data.car;
     } catch (e) {
       lastErr = e;
-      if (String(e.message).startsWith("API 4")) break;
+      if (e.permanent) break;
     }
   }
   throw lastErr || new Error("Ukendt fejl");
@@ -718,7 +738,8 @@ function CompareBox({cars}) {
 function CarCard({car,form,onReject,rank=0,loading}) {
   const C = useC();
   const [expanded,setExpanded]=useState(false);
-  const [pct,setPct]=useState(5);
+  const [pct,setPct]=useState(15);
+  const [narrow,setNarrow]=useState(false);
   const [color,setColor]=useState(null);
   const isAlt = rank>0;
   if(loading) return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:18,padding:"48px 24px",textAlign:"center"}}>
@@ -801,29 +822,44 @@ function CarCard({car,form,onReject,rank=0,loading}) {
       </Panel>
 
       <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:14,padding:"15px 17px",marginBottom:13}}>
-        <div style={{color:C.muted,fontSize:12,textTransform:"uppercase",letterSpacing:".09em",fontWeight:700,marginBottom:9}}>Søg på Bilbasen med præcis dette</div>
-        <div style={{color:C.text,fontSize:15.5,lineHeight:1.75,marginBottom:12}}>
-          {car.brand} {car.model}{car.variant?` ${car.variant}`:""} · årgang {(yearBand(car,form)[0]||"?")}{yearBand(car,form)[1]?`–${yearBand(car,form)[1]}`:""} · {(lo&&hi)?`${fmtDKK(lo)} – ${fmtDKK(hi)}`:"pris efter budget"}
-          {num(form.kmMax)?` · maks ${new Intl.NumberFormat("da-DK").format(num(form.kmMax))} km`:""}
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:14}}>
-          <span style={{color:C.muted,fontSize:14.5}}>Prisspænd:</span>
-          {[5,10,15,25].map(p=><button key={p} onClick={()=>setPct(p)} style={{padding:"7px 14px",minHeight:40,borderRadius:999,border:`1.5px solid ${pct===p?C.accent:C.border2}`,background:pct===p?C.accentSoft:C.surface,color:pct===p?C.accent:C.muted,fontSize:14,fontWeight:pct===p?700:500,cursor:"pointer",fontFamily:"inherit"}}>±{p}%</button>)}
+        <div style={{color:C.muted,fontSize:12,textTransform:"uppercase",letterSpacing:".09em",fontWeight:700,marginBottom:9}}>Se den til salg</div>
+        <div style={{color:C.text,fontSize:15.5,lineHeight:1.75,marginBottom:14}}>
+          {car.brand} {car.model}{variantTerm(form,car)?` ${variantTerm(form,car)}`:""}
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <Btn as="a" href={buildBilbasenModelUrl(form,car,pct)} target="_blank" rel="noopener noreferrer" full>
-            Søg med disse filtre →
-          </Btn>
-          <Btn as="a" href={buildBilbasenPlainUrl(car)} target="_blank" rel="noopener noreferrer" kind="ghost" size="sm" full>
-            Alle {car.brand} {car.model} — uden filtre →
-          </Btn>
-          <Btn as="a" href={buildBilbasenBroadUrl(form,car)} target="_blank" rel="noopener noreferrer" kind="quiet" size="sm" full>
-            Lignende biler i samme klasse →
+          <Btn as="a" href={buildBilbasenModelUrl(form,car)} target="_blank" rel="noopener noreferrer" full>
+            Se alle til salg på Bilbasen →
           </Btn>
         </div>
-        <p style={{color:C.dim,fontSize:13,lineHeight:1.6,marginTop:12}}>
-          Giver den filtrerede søgning ingen biler, så prøv et bredere prisspænd eller “uden filtre”.
-        </p>
+
+        {/* Den snævre søgning er foldet væk. Den kan ramme nul, og så skal den
+            ikke være det første man møder. */}
+        <button onClick={()=>setNarrow(!narrow)}
+          style={{background:"none",border:"none",color:C.accent,fontSize:15,fontWeight:600,cursor:"pointer",marginTop:12,padding:"8px 0",minHeight:40,fontFamily:"inherit"}}>
+          {narrow?"Skjul":"Snævr ind på årgang og pris"}
+        </button>
+        {narrow && <div style={{marginTop:6,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
+          <div style={{color:C.text,fontSize:15,lineHeight:1.7,marginBottom:12}}>
+            Årgang {(yearBand(car,form)[0]||"?")}{yearBand(car,form)[1]?`–${yearBand(car,form)[1]}`:""}
+            {(lo&&hi)?` · ${fmtDKK(lo)} – ${fmtDKK(hi)}`:""}
+            {num(form.kmMax)?` · maks ${new Intl.NumberFormat("da-DK").format(num(form.kmMax))} km`:""}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:14}}>
+            <span style={{color:C.muted,fontSize:14.5}}>Prisspænd:</span>
+            {[5,10,15,25].map(p=><button key={p} onClick={()=>setPct(p)} style={{padding:"7px 14px",minHeight:40,borderRadius:999,border:`1.5px solid ${pct===p?C.accent:C.border2}`,background:pct===p?C.accentSoft:C.surface,color:pct===p?C.accent:C.muted,fontSize:14,fontWeight:pct===p?700:500,cursor:"pointer",fontFamily:"inherit"}}>±{p}%</button>)}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <Btn as="a" href={buildBilbasenFilteredUrl(form,car,pct)} target="_blank" rel="noopener noreferrer" kind="ghost" size="sm" full>
+              Søg med årgang og prisklasse →
+            </Btn>
+            <Btn as="a" href={buildBilbasenBroadUrl(form,car)} target="_blank" rel="noopener noreferrer" kind="quiet" size="sm" full>
+              Lignende biler i samme klasse →
+            </Btn>
+          </div>
+          <p style={{color:C.dim,fontSize:13,lineHeight:1.6,marginTop:12}}>
+            Giver den ingen biler, er prisskønnet nok ved siden af — prøv et bredere prisspænd, eller brug knappen ovenfor.
+          </p>
+        </div>}
       </div>
       <p style={{color:C.dim,fontSize:13,textAlign:"center",paddingBottom:18}}>* Estimater — ikke garantier</p>
     </div>
@@ -999,21 +1035,21 @@ function HelpSection({onPick}) {
 
 /* Et forslag der ikke kunne hentes. Vises som et rigtigt kort med en
    forklaring, så pladsen ikke bare står tom. */
-function FailedCard({rank,onRetry}) {
+function FailedCard({rank,msg,onRetry}) {
   const C = useC();
   return <div style={{background:C.surface,border:`1px dashed ${C.border2}`,borderRadius:18,
     padding:"40px 24px",textAlign:"center"}}>
     <div style={{color:C.text,fontSize:17,fontWeight:600,marginBottom:8}}>
       {RANK_LABEL[rank]||`Forslag ${rank+1}`} kunne ikke hentes
     </div>
-    <p style={{color:C.muted,fontSize:15.5,lineHeight:1.6,marginBottom:20,maxWidth:"34ch",marginLeft:"auto",marginRight:"auto"}}>
-      Det sker en sjælden gang, når der er tryk på. De øvrige forslag er ikke berørt.
+    <p style={{color:C.muted,fontSize:15.5,lineHeight:1.6,marginBottom:20,maxWidth:"36ch",marginLeft:"auto",marginRight:"auto"}}>
+      {msg || "De øvrige forslag er ikke berørt."}
     </p>
     <Btn kind="ghost" size="sm" onClick={onRetry}>Prøv dette forslag igen</Btn>
   </div>;
 }
 
-function Results({cards,loading,failed,onRetry,form,onReject,onRefresh,summary,onPickService}) {
+function Results({cards,loading,failed,failMsg,onRetry,form,onReject,onRefresh,summary,onPickService}) {
   const C = useC();
   const busy = loading.some(Boolean);
   const shown = cards.filter(Boolean);
@@ -1025,7 +1061,7 @@ function Results({cards,loading,failed,onRetry,form,onReject,onRefresh,summary,o
     {/* To ad gangen på skærme der har plads, ellers under hinanden */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,420px),1fr))",gap:18,alignItems:"start"}}>
       {cards.map((car,i)=> failed[i] && !loading[i]
-        ? <FailedCard key={i} rank={i} onRetry={()=>onRetry(i)}/>
+        ? <FailedCard key={i} rank={i} msg={failMsg[i]} onRetry={()=>onRetry(i)}/>
         : <CarCard key={i} car={car} form={form} rank={i} loading={loading[i]}
             onReject={!loading[i]&&car?()=>onReject(i):null}/>)}
     </div>
@@ -1281,6 +1317,7 @@ function App() {
   const [cards,setCards] = useState([null,null,null,null]);
   const [loading,setLoading] = useState([false,false,false,false]);
   const [failed,setFailed] = useState([false,false,false,false]);
+  const [failMsg,setFailMsg] = useState(["","","",""]);
   const [error,setError] = useState("");
   const [excluded,setExcluded] = useState([[],[],[],[]]);
   const [lead,setLead] = useState(null);
@@ -1315,6 +1352,7 @@ function App() {
     setCards([null,null,null,null]);
     setLoading([true,true,true,true]);
     setFailed([false,false,false,false]);
+    setFailMsg(["","","",""]);
     setError("");
     top();
 
@@ -1325,6 +1363,7 @@ function App() {
       setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I tre bevidst anderledes bud.`);
     } catch(e) {
       setFailed(f=>[true,f[1],f[2],f[3]]);
+      setFailMsg(m=>[e.hint||e.message||"",m[1],m[2],m[3]]);
     }
     setLoading(l=>[false,l[1],l[2],l[3]]);
 
@@ -1345,6 +1384,7 @@ function App() {
         setCards(c=>c.map((v,i)=>i===idx?car:v));
       } catch(e) {
         setFailed(f=>f.map((v,i)=>i===idx?true:v));
+        setFailMsg(m=>m.map((v,i)=>i===idx?(e.hint||e.message||""):v));
       } finally {
         setLoading(l=>l.map((v,i)=>i===idx?false:v));
       }
@@ -1362,6 +1402,7 @@ function App() {
       setCards(c=>c.map((v,i)=>i===idx?car:v));
     } catch(e) {
       setFailed(f=>f.map((v,i)=>i===idx?true:v));
+      setFailMsg(m=>m.map((v,i)=>i===idx?(e.hint||e.message||""):v));
     }
     setLoading(l=>l.map((v,i)=>i===idx?false:v));
   }
@@ -1488,7 +1529,7 @@ function App() {
         </>}
 
         {page==="finder" && showResults && <div style={{paddingTop:30}}><Results
-          cards={cards} loading={loading} failed={failed} onRetry={retrySlot}
+          cards={cards} loading={loading} failed={failed} failMsg={failMsg} onRetry={retrySlot}
           form={form} summary={summary} onReject={handleReject}
           onPickService={s=>setLead(s)}
           onRefresh={()=>{setShowResults(false);setCards([null,null,null,null]);setFailed([false,false,false,false]);setSummary("");setExcluded([[],[],[],[]]);setStep(4);top();}}

@@ -73,21 +73,26 @@ trin hvis et led ikke svarer:
 
 ## Bilbasen-søgninger
 
-Søgningen bygges i den rækkefølge, der snævrer mest ind først:
+Bilbasen er spærret fra byggemiljøet, så URL-formerne er udledt af rigtige
+Bilbasen-sider som søgemaskiner har indekseret. Titlen på en Bilbasen-side
+indeholder antallet af biler, og det viser hvilke former der giver resultater:
 
-1. **mærke og model** som sti — `/brugt/bil/vw/golf`
-2. **årgang** — `yearfrom` / `yearto`
-3. **prisklasse** — `pricefrom` / `priceto`
-4. **brændstof og km** — `fuel` / `mileageto`
-5. **fritekst til sidst** — `free`, kun til varianter som `vRS`
+| Form | Belæg |
+| --- | --- |
+| Sti alene, `/brugt/bil/skoda/octavia` | Virker — "Skoda Octavia - 24 brugte til salg" |
+| Sti med fritekst, `/brugt/bil/skoda/octavia/ps-vrs` | Virker — "vrs \| Skoda Octavia" |
+| Flad form med filtre, `/brugt/bil?free=aut&fuel=1&priceto=75000` | Virker — "aut \| Benzin - 2071 brugte" |
+| Sti **plus** parametre | Intet belæg |
 
-Sti og parametre virker sammen. Fritekst bruges bevidst ikke til mærke og
-model — det er stiens opgave, og dobbeltbinding er den hurtigste vej til nul
-resultater.
+Appen byggede tidligere den sidste form. Derfor:
 
-Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*. Er
-estimatet nogle procent ved siden af, og båndet smalt, giver søgningen nul
-biler. Brugeren kan selv stramme til ±5 % på kortet.
+- **Hovedknappen bruger kun stien.** Den kan ikke ramme nul på grund af et
+  filter der er sat forkert, og modelnavn plus variant er nok til at lande på
+  de rigtige biler.
+- **Den snævre søgning bruger den flade form** og er foldet væk bag et link,
+  fordi den kan give nul hvis prisskønnet er ved siden af.
+
+Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*.
 
 ## Fire forslag ad gangen
 
