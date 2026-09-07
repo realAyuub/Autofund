@@ -72,6 +72,13 @@ trin hvis et led ikke svarer:
 3. **Tegning** — en silhuet per karosseritype. De samme tegninger bruges som
    ikoner, når man vælger karosseri, så man ikke skal vide hvad en MPV er.
 
+Tegningerne er bygget på ét fælles proportionsgitter i `CAR_SHAPES`, så
+bilerne kan sammenlignes indbyrdes: vej y=77, hjulcentrum y=62, dørtærskel
+y=61, bæltelinje y=40, tag y=24 for en almindelig personbil. Hjulkasserne er
+ægte halvcirkler med radius hjulradius+4, ikke gættede kurver — ellers opstår
+der huller mellem karosseri og dæk. Karosserityperne står i rækkefølge efter
+størrelse.
+
 **Billedet kontrolleres.** Vi kan ikke se hvad der er på et foto, men vi kan
 se hvilken artikel det kommer fra. Et foto godtages kun hvis artiklens titel
 indeholder både mærket og modellen — ellers vises tegningen frem for et
