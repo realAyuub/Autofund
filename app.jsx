@@ -30,10 +30,16 @@ const SERVICES = [
 /* ── Mærker: hele det danske marked, søgbart ── */
 const BRANDS = ["Abarth","Aiways","Alfa Romeo","Alpine","Aston Martin","Audi","Bentley","BMW","BYD","Cadillac","Chevrolet","Chrysler","Citroën","Cupra","Dacia","Daihatsu","Dodge","DS Automobiles","Ferrari","Fiat","Ford","Genesis","GWM","Honda","Hongqi","Hyundai","Isuzu","Jaecoo","Jaguar","Jeep","Kia","Lada","Lamborghini","Lancia","Land Rover","Leapmotor","Lexus","Lotus","Maserati","Maxus","Mazda","McLaren","Mercedes-Benz","MG","Mini","Mitsubishi","NIO","Nissan","Omoda","Opel","Peugeot","Polestar","Porsche","Renault","Rolls-Royce","Rover","Saab","Seat","Seres","Skoda","Skywell","Smart","SsangYong","Subaru","Suzuki","Tesla","Toyota","VinFast","Volkswagen","Volvo","Xpeng","Zeekr"];
 
-const BODY_TYPES = ["Hatchback","Sedan","Stationcar","SUV","MPV","Cabriolet","Pickup","Coupe"];
 const FUEL_TYPES = ["Benzin","Diesel","El","Hybrid","Plugin-hybrid"];
 const REGIONS = ["Hele Danmark","Sjælland","Fyn","Jylland","København og omegn","Aarhus","Odense"];
-const PRIORITIES = ["Lavt brændstofforbrug","God gensalgsværdi","Pålidelig motor","Lave serviceomkostninger","Sikkerhed","Komfort","Stort bagagerum","Teknologi & skærme","Ladetid","Plads til familien","Lav forsikring","Firehjulstræk","Sporty køreoplevelse","Høj motoreffekt"];
+const PRIORITY_GROUPS = [
+  ["Økonomi",          ["Lavt brændstofforbrug","Lave serviceomkostninger","God gensalgsværdi","Lav forsikring"]],
+  ["Tryghed",          ["Sikkerhed","Pålidelig motor","Firehjulstræk"]],
+  ["Plads og komfort", ["Plads til familien","Stort bagagerum","Komfort"]],
+  ["Køreoplevelse",    ["Sporty køreoplevelse","Høj motoreffekt"]],
+  ["El og teknologi",  ["Ladetid","Teknologi & skærme"]],
+];
+const PRIORITIES = PRIORITY_GROUPS.flatMap(([,items])=>items);
 const CHARACTERS = ["Familiebil","Praktisk & økonomisk","Komfort & luksus","Sporty / performance","Offroad / 4x4"];
 
 const STEPS = [
@@ -48,7 +54,14 @@ const STEPS = [
 /* Bilbasen-koder, verificeret mod rigtige Bilbasen-URL'er:
    karosseri er navne (cartypes=MPV), brændstof er tal (fuel=2 = diesel). */
 const BB_FUEL = {Benzin:"1",Diesel:"2",Hybrid:"3","Plugin-hybrid":"4",El:"5"};
-const BB_BODY = {Hatchback:"Hatchback",Sedan:"Sedan",Stationcar:"Stationcar",Cabriolet:"Cabriolet",Pickup:"Pickup",MPV:"MPV",Coupe:"Coupe",SUV:"SUV"};
+/* Værdier til Bilbasens cartypes-filter. Kun værdier vi har belæg for.
+   "Mikro" og "Crossover (CUV)" står bevidst IKKE her: vi kender ikke Bilbasens
+   filterværdi for dem, og et gæt ville kunne give nul resultater. Vælger man
+   dem, udelades karosserifilteret blot fra den brede søgning — resten af
+   filtrene virker uændret, og hovedknappen bruger alligevel ikke cartypes. */
+const BB_BODY = {"Hatchback":"Hatchback","Coupe":"Coupe","Cabriolet":"Cabriolet",
+  "Sedan":"Sedan","Stationcar":"Stationcar","SUV":"SUV",
+  "Minibus (MPV)":"MPV","Pickup":"Pickup"};
 /* Bilbasen bruger korte navne i mærke-stien (/brugt/bil/vw, ikke /volkswagen)
    med bindestreg i mærker (/alfa-romeo/giulia) og underscore i modeller (/renault/megane_iv) */
 const SLUG_OVERRIDES = {"Volkswagen":"vw","Mercedes-Benz":"mercedes","DS Automobiles":"ds","Land Rover":"land-rover","Alfa Romeo":"alfa-romeo","Aston Martin":"aston-martin","Rolls-Royce":"rolls-royce","VinFast":"vinfast","MG":"mg","BMW":"bmw","BYD":"byd","GWM":"gwm","NIO":"nio","DS":"ds"};
@@ -121,7 +134,6 @@ function buildProfile(f, rank, exclude, avoidCar) {
     `Ønsket udstyrs-/motorvariant: ${f.variantWish||"ingen"}`,
     `Gearkasse: ${f.transmission||"ligemeget"} — anhængertræk: ${f.towbar||"ikke oplyst"}`,
     `Prioriteter: ${(f.priorities||[]).join(", ")||"ingen"}`,
-    `Særlige behov: ${f.extras||"ingen"}`,
   ];
   const hard = [];
   if ((f.brands||[]).length) hard.push(`Bilen SKAL være af et af disse mærker: ${f.brands.join(" eller ")}.`);
@@ -136,8 +148,6 @@ function buildProfile(f, rank, exclude, avoidCar) {
   // over samme bil. Vinklerne er formuleret som krav, ikke som ønsker.
   const ANGLES = {
     2: 'Dette er FORSLAG 2. Vælg et ANDET MÆRKE end forslag 1, og enten en anden karosseriform eller et andet drivmiddel.',
-    3: 'Dette er FORSLAG 3. Find det mest PRISFORNUFTIGE valg der stadig opfylder kravene — lavest samlede ejeromkostninger over fem år. Andet mærke end de foregående.',
-    4: 'Dette er FORSLAG 4. Find det mest OVERRASKENDE valg — en bil de færreste ville tænke på, men som passer til profilen. Andet mærke end de foregående.',
   };
   const rankTxt = rank===1
     ? `Dette er FORSLAG 1 — det bedste samlede match.`
@@ -404,12 +414,15 @@ function TextArea({value,onChange,placeholder,rows=4}) {
     style={{width:"100%",background:C.surface,border:`1.5px solid ${C.border2}`,borderRadius:12,padding:"13px 17px",color:C.text,fontSize:16,outline:"none",resize:"vertical",fontFamily:"inherit",lineHeight:1.6}}
     onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border2}/>;
 }
-function Field({label,hint,children,help}) {
+function Field({label,hint,children,help,required}) {
   const C = useC();
-  return <div style={{marginBottom:28}}>
-    <div style={{marginBottom:10}}>
+  return <div style={{marginBottom:22}}>
+    <div style={{marginBottom:9,display:"flex",alignItems:"baseline",gap:9,flexWrap:"wrap"}}>
       <span style={{color:C.text,fontSize:16.5,fontWeight:600}}>{label}</span>
-      {hint && <span style={{color:C.muted,fontSize:14.5,marginLeft:10}}>{hint}</span>}
+      {required
+        ? <span style={{color:C.accent,fontSize:12.5,fontWeight:700,letterSpacing:".04em"}}>SKAL UDFYLDES</span>
+        : <span style={{color:C.dim,fontSize:13.5}}>valgfrit</span>}
+      {hint && <span style={{color:C.muted,fontSize:14.5}}>{hint}</span>}
     </div>
     {help && <p style={{color:C.muted,fontSize:15,marginBottom:12,lineHeight:1.6,maxWidth:"62ch"}}>{help}</p>}
     {children}
@@ -515,104 +528,215 @@ function carImageUrl(car) {
   if (yf) p.set("modelYear", yf);
   return `https://cdn.imagin.studio/getimage?${p.toString()}`;
 }
-/* Silhuetter, så en stationcar ikke tegnes som en SUV. */
-const SILHOUETTES = {
-  low: {
-    body: "M10,74 L10,58 Q10,52 18,50 L50,44 L70,26 Q75,21 86,21 L128,21 Q139,21 146,27 L166,48 L182,52 Q190,54 190,61 L190,74 Z",
-    glass:"M58,45 L76,29 Q78,27 84,27 L98,27 L98,45 Z M104,27 L126,27 Q132,27 136,31 L149,45 L104,45 Z",
-    wheels:[[50,74],[152,74]],
-  },
-  tall: {
-    body: "M10,74 L10,52 Q10,46 18,44 L46,38 L62,17 Q67,12 78,12 L136,12 Q147,12 153,19 L170,42 L182,46 Q190,48 190,55 L190,74 Z",
-    glass:"M54,39 L68,20 Q70,18 76,18 L98,18 L98,39 Z M104,18 L134,18 Q140,18 144,23 L155,39 L104,39 Z",
-    wheels:[[52,74],[150,74]],
-  },
-  pickup: {
-    body: "M10,74 L10,56 Q10,50 18,48 L42,44 L58,22 Q63,17 74,17 L110,17 Q118,17 122,24 L134,48 L190,48 Q196,48 196,54 L196,74 Z",
-    glass:"M52,45 L64,25 Q66,23 72,23 L88,23 L88,45 Z M94,23 L108,23 Q113,23 116,28 L124,45 L94,45 Z",
-    wheels:[[50,74],[158,74]],
-  },
+/* Én silhuet per karosseritype, tegnet på ét fælles gitter så bilerne kan
+   sammenlignes: vejbane y=77 for alle, hjulcentrum y=77-r, så hjulene rører
+   vejen. Hver bil er tegnet i sin RIGTIGE indbyrdes størrelse — en mikrobil
+   fylder mindre i rammen end en pickup — så størrelsesrækkefølgen kan ses.
+   Det der adskiller typerne er tre tal: dørtærsklens højde (frihøjde),
+   taghøjden, og vinduernes underkant. En stationcar er lav og lang med et
+   stort vinduesareal; en SUV er høj med store hjul og et dybt karosseri. */
+const GROUND = 77;
+const ARCH_GAP = 3;
+/* Hjulkassen centreres om HJULET, ikke om dørtærsklen. Ellers bliver ringen
+   tykkere foroven end i siderne, og buen ser ud som en bule. */
+const archDx = (r, sill) => {
+  const a = r + ARCH_GAP, dy = sill - (GROUND - r);
+  return Math.sqrt(Math.max(a*a - dy*dy, 1));
 };
-const bodyShape = b => ["SUV","MPV"].includes(b) ? "tall" : b==="Pickup" ? "pickup" : "low";
+const wheelArches = (fw,rw,r,sill,x0) => {
+  const a = r + ARCH_GAP, dx = archDx(r, sill);
+  return `L${(rw+dx).toFixed(1)},${sill} A${a},${a} 0 0 0 ${(rw-dx).toFixed(1)},${sill}`
+       + ` L${(fw+dx).toFixed(1)},${sill} A${a},${a} 0 0 0 ${(fw-dx).toFixed(1)},${sill} L${x0},${sill} Z`;
+};
+
+/* Rækkefølge efter størrelse. Navnene følger Bilbasens egne kategorier. */
+const BODY_TYPES = ["Mikro", "Hatchback", "Coupe", "Cabriolet", "Sedan", "Crossover (CUV)", "Stationcar", "SUV", "Minibus (MPV)", "Pickup"];
+
+const CAR_SHAPES = {
+  "Mikro":{fw:70,rw:132,r:12,sill:63,
+    body:`M48,63 L48,52 Q48,48 53,47 L62,45 L74,30 Q77,28 82,28 L118,28 Q123,28 126,31 L136,45 Q142,47 145,51 L146,56 L146,63 L146.9,63 A15,15 0 0 0 117.1,63 L84.9,63 A15,15 0 0 0 55.1,63 L48,63 Z`,
+    glass:"M68,43 L78,31 L96,31 L96,43 Z M102,31 L116,31 Q119,31 121,33 L128,43 L102,43 Z",
+    trim:"M56,55 L142,56"},
+  "Hatchback":{fw:56,rw:146,r:14,sill:62,
+    body:`M26,62 L26,50 Q26,46 31,45 L48,42 L78,41 L92,26 Q95,24 100,24 L134,24 Q139,24 142,27 L158,43 Q164,45 166,49 L167,54 L167,62 L163.0,62 A17,17 0 0 0 129.0,62 L73.0,62 A17,17 0 0 0 39.0,62 L26,62 Z`,
+    glass:"M82,39 L95,27 L112,27 L112,39 Z M118,27 L132,27 Q135,27 137,29 L146,39 L118,39 Z",
+    trim:"M34,54 L162,55"},
+  "Coupe":{fw:52,rw:152,r:14,sill:62,
+    body:`M14,62 L14,52 Q14,48 19,47 L44,44 L80,43 L98,29 Q103,27 110,27 L126,27 Q132,27 136,30 L160,43 L180,46 Q186,47 186,52 L186,62 L169.0,62 A17,17 0 0 0 135.0,62 L69.0,62 A17,17 0 0 0 35.0,62 L14,62 Z`,
+    glass:"M88,41 L101,30 Q103,29 107,29 L123,29 Q128,29 131,32 L142,41 Z",
+    trim:"M22,55 L180,56"},
+  "Cabriolet":{fw:52,rw:152,r:14,sill:62,
+    body:`M14,62 L14,52 Q14,48 19,47 L44,44 L80,43 L90,31 Q92,29 96,29 L103,29 Q106,30 106,34 L106,46 L142,46 Q156,43 168,46 L180,50 Q186,52 186,56 L186,62 L169.0,62 A17,17 0 0 0 135.0,62 L69.0,62 A17,17 0 0 0 35.0,62 L14,62 Z`,
+    glass:"M92,42 L97,32 Q98,31 100,31 L102,31 L102,42 Z",
+    cabin:"M106,46 L106,40 L142,40 L142,46 Z",
+    trim:"M22,56 L180,57"},
+  "Sedan":{fw:50,rw:154,r:14,sill:62,
+    body:`M8,62 L8,50 Q8,46 13,45 L36,42 L72,41 L90,26 Q93,24 98,24 L132,24 Q137,24 140,27 L152,41 L188,43 Q193,44 193,49 L193,62 L171.0,62 A17,17 0 0 0 137.0,62 L67.0,62 A17,17 0 0 0 33.0,62 L8,62 Z`,
+    glass:"M78,39 L94,27 L111,27 L111,39 Z M117,27 L131,27 Q134,27 136,29 L143,39 L117,39 Z",
+    trim:"M18,54 L186,55"},
+  "Crossover (CUV)":{fw:56,rw:146,r:16,sill:57,
+    body:`M28,57 L28,44 Q28,40 33,39 L50,36 L80,35 L94,20 Q97,18 102,18 L134,18 Q139,18 142,21 L156,37 Q162,39 164,43 L165,48 L165,57 L164.6,57 A19,19 0 0 0 127.4,57 L74.6,57 A19,19 0 0 0 37.4,57 L28,57 Z`,
+    glass:"M84,33 L97,21 L113,21 L113,33 Z M119,21 L132,21 Q135,21 137,23 L145,33 L119,33 Z",
+    trim:"M36,49 L160,50"},
+  "Stationcar":{fw:48,rw:158,r:13,sill:63,
+    body:`M6,63 L6,52 Q6,48 11,47 L34,44 L70,43 L86,25 Q89,23 94,23 L172,23 Q177,23 180,26 L188,43 L192,45 Q195,46 195,50 L195,63 L174.0,63 A16,16 0 0 0 142.0,63 L64.0,63 A16,16 0 0 0 32.0,63 L6,63 Z`,
+    glass:"M76,41 L92,26 L110,26 L110,41 Z M116,26 L138,26 L138,41 L116,41 Z M144,26 L170,26 Q174,26 176,28 L184,41 L144,41 Z",
+    trim:"M16,55 L188,56"},
+  "SUV":{fw:54,rw:150,r:19,sill:56,
+    body:`M14,56 L14,36 Q14,32 19,31 L36,28 L74,27 L88,10 Q91,8 96,8 L156,8 Q162,8 165,11 L174,27 L184,29 Q189,30 189,35 L189,56 L171.9,56 A22,22 0 0 0 128.1,56 L75.9,56 A22,22 0 0 0 32.1,56 L14,56 Z`,
+    glass:"M80,25 L93,11 L112,11 L112,25 Z M118,11 L138,11 L138,25 L118,25 Z M144,11 L154,11 Q158,11 160,13 L168,25 L144,25 Z",
+    trim:"M22,44 L182,45"},
+  "Minibus (MPV)":{fw:48,rw:158,r:14,sill:62,
+    body:`M6,62 L6,44 Q6,40 11,39 L20,35 L52,12 Q56,9 64,9 L170,9 Q177,9 180,13 L190,35 Q195,38 196,43 L196,62 L175.0,62 A17,17 0 0 0 141.0,62 L65.0,62 A17,17 0 0 0 31.0,62 L6,62 Z`,
+    glass:"M40,33 L58,14 Q60,13 64,13 L96,13 L96,33 Z M102,13 L130,13 L130,33 L102,33 Z M136,13 L168,13 Q172,13 174,15 L184,33 L136,33 Z",
+    trim:"M16,50 L190,51"},
+  "Pickup":{fw:46,rw:160,r:15,sill:61,
+    body:`M4,61 L4,49 Q4,45 9,44 L26,41 L58,40 L76,22 Q79,20 84,20 L116,20 Q121,20 124,23 L134,40 L134,42 L194,42 Q197,42 197,45 L197,61 L178.0,61 A18,18 0 0 0 142.0,61 L64.0,61 A18,18 0 0 0 28.0,61 L4,61 Z`,
+    glass:"M64,38 L80,23 L101,23 L101,38 Z M107,23 L114,23 Q118,23 120,25 L127,38 L107,38 Z",
+    trim:"M14,52 L132,53"},
+};
 
 function CarSilhouette({body,paint,glass,wheel,style}) {
-  const shape = SILHOUETTES[bodyShape(body)];
-  return <svg viewBox="0 0 206 92" role="img" aria-label={`Illustration af ${body||"bil"}`} style={style}>
-    <path d={shape.body} fill={paint}/>
-    <path d={shape.glass} fill={glass} opacity=".55"/>
-    {shape.wheels.map(([cx,cy],i)=><g key={i}>
-      <circle cx={cx} cy={cy} r="13" fill={wheel} opacity=".88"/>
-      <circle cx={cx} cy={cy} r="5.5" fill={glass}/>
+  const sh = CAR_SHAPES[body] || CAR_SHAPES.Hatchback;
+  const cy = GROUND - sh.r, a = sh.r + ARCH_GAP;
+  return <svg viewBox="0 0 200 84" role="img" aria-label={`Tegning af ${body||"bil"}`} style={style}>
+    {/* Hjulkassen bag hjulet, så mellemrummet ind til dækket læses som skygge */}
+    {[sh.fw,sh.rw].map((cx,i)=><g key={"w"+i}>
+      <circle cx={cx} cy={cy} r={a} fill={paint}/>
+      <circle cx={cx} cy={cy} r={a} fill={wheel} opacity=".4"/>
+    </g>)}
+    <path d={sh.body} fill={paint}/>
+    {sh.cabin && <path d={sh.cabin} fill={wheel} opacity=".4"/>}
+    <path d={sh.glass} fill={glass} opacity=".75"/>
+    <path d={sh.trim} stroke={wheel} strokeOpacity=".13" strokeWidth="2" fill="none"/>
+    {[sh.fw,sh.rw].map((cx,i)=><g key={"h"+i}>
+      <circle cx={cx} cy={cy} r={sh.r} fill={wheel}/>
+      <circle cx={cx} cy={cy} r={sh.r*0.48} fill={glass}/>
+      <circle cx={cx} cy={cy} r={sh.r*0.17} fill={wheel} opacity=".5"/>
     </g>)}
   </svg>;
 }
 
-/* Wikipedia som gratis billedkilde: ingen nøgle, ingen oprettelse, og
-   bilartiklers hovedbillede er næsten altid et udvendigt dagslysfoto skråt
-   forfra — altså nogenlunde den ensartethed vi er ude efter. Vi prøver dansk
-   Wikipedia først og falder tilbage til engelsk. Svaret gemmes, så samme bil
-   ikke slås op igen. */
+/* Karosseri vælges på tegningen. Produktet er til folk der ikke kender
+   forskel på en MPV og en stationcar — så vis det frem for at skrive det. */
+function BodyTypePicker({value=[],onChange}) {
+  const C = useC();
+  return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
+    {BODY_TYPES.map(b=>{
+      const on = value.includes(b);
+      return <button key={b} onClick={()=>onChange(on?value.filter(v=>v!==b):[...value,b])} aria-pressed={on}
+        style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 8px 8px",
+          borderRadius:12,cursor:"pointer",fontFamily:"inherit",
+          border:`1.5px solid ${on?C.accent:C.border2}`,background:on?C.accentSoft:C.surface}}>
+        <CarSilhouette body={b} paint={on?C.accent:C.muted} glass={on?C.accentSoft:C.panel} wheel={C.text}
+          style={{width:"100%",maxWidth:96}}/>
+        <span style={{fontSize:14,fontWeight:on?700:500,color:on?C.accent:C.text}}>{b}</span>
+      </button>;
+    })}
+  </div>;
+}
+
+/* Vi kan ikke se HVAD der er på et foto, men vi kan kontrollere hvilken artikel
+   det kommer fra. Et foto godtages kun hvis artiklens titel indeholder både
+   mærket og modellen — ellers vises tegningen frem for et billede af en anden
+   bil. Varianten prioriteres, fordi en GTI ser markant anderledes ud end en
+   almindelig Golf, og "Volkswagen Golf GTI" har sin egen artikel. */
 const wikiCache = new Map();
-/* Vi SØGER frem for at slå en præcis titel op. Danske modelnavne rammer sjældent
-   en artikeltitel — "BMW 1-serie" hedder "BMW 1 Series" på engelsk — og et
-   præcist opslag fejler derfor lydløst. Søgningen finder artiklen alligevel. */
-async function fetchWikiImage(brand, model, hint) {
-  const query = (hint || `${brand} ${model}`).trim();
-  if (wikiCache.has(query)) return wikiCache.get(query);
+
+const normTitle = t => String(t||"").toLowerCase()
+  .replace(/ø/g,"o").replace(/æ/g,"ae").replace(/å/g,"a")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+  .replace(/[^a-z0-9]+/g," ").trim();
+
+// Wikipedia og danske forhandlere staver ikke mærkerne ens
+const BRAND_ALIASES = {"volkswagen":["volkswagen","vw"],"mercedes-benz":["mercedes","benz"],
+  "citroën":["citroen"],"ds automobiles":["ds","citroen"]};
+
+function articleMatches(title, brand, model) {
+  const t = normTitle(title);
+  const brandOk = (BRAND_ALIASES[String(brand).toLowerCase()] || [brand])
+    .some(b => t.includes(normTitle(b)));
+  // Modellens første ord er nok: "1 Series" vs "1-serie", "Model 3" vs "Model 3"
+  const modelWord = normTitle(model).split(" ")[0];
+  return brandOk && modelWord.length > 0 && t.includes(modelWord);
+}
+
+async function fetchWikiImage(brand, model, hint, variant) {
+  const key = `${brand}|${model}|${hint||""}|${variant||""}`;
+  if (wikiCache.has(key)) return wikiCache.get(key);
+
   const ask = async (host, q) => {
     const u = `https://${host}/w/api.php?action=query&format=json&formatversion=2&origin=*`
-      + `&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=3&gsrnamespace=0`
+      + `&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=5&gsrnamespace=0`
       + `&prop=pageimages&piprop=thumbnail&pithumbsize=800`;
     const r = await fetch(u);
     if (!r.ok) return null;
     const d = await r.json();
-    const pages = d?.query?.pages || [];
-    // Søgningen sorterer efter relevans; tag det første træf der faktisk har et billede
-    const hit = [...pages].sort((a,b)=>(a.index||0)-(b.index||0)).find(p=>p.thumbnail?.source);
-    return hit ? hit.thumbnail.source : null;
+    const pages = (d?.query?.pages || [])
+      .filter(pg => pg.thumbnail?.source && articleMatches(pg.title, brand, model))
+      .sort((a,b)=>(a.index||0)-(b.index||0));
+    if (!pages.length) return null;
+    const v = normTitle(variant);
+    const exact = v ? pages.find(pg => normTitle(pg.title).includes(v)) : null;
+    const pick = exact || pages[0];
+    return { src: pick.thumbnail.source, title: pick.title, variantMatch: !!exact };
   };
-  let src = null;
+
+  let out = null;
   try {
-    src = await ask("en.wikipedia.org", query)          // engelsk har flest bilartikler med foto
-       || await ask("da.wikipedia.org", query)
-       || await ask("en.wikipedia.org", `${brand} ${model} car`);
-  } catch (e) { src = null; }
-  wikiCache.set(query, src);
-  return src;
+    // Mest specifikke søgning først, så en GTI ikke ender som en almindelig Golf
+    const queries = [
+      variant ? `${brand} ${model} ${variant}` : null,
+      hint || null,
+      `${brand} ${model}`,
+    ].filter(Boolean);
+    for (const q of queries) {
+      out = (await ask("en.wikipedia.org", q)) || (await ask("da.wikipedia.org", q));
+      if (out) break;
+    }
+  } catch (e) { out = null; }
+  wikiCache.set(key, out);
+  return out;
 }
 
-function CarPhoto({car,tint}) {
+function CarPhoto({car,tint,variant}) {
   const C = useC();
   const studio = carImageUrl(car);
   const [src,setSrc] = useState(studio);
+  const [caption,setCaption] = useState(studio ? "Illustrationsfoto" : "");
   const [isPhoto,setIsPhoto] = useState(!!studio);
 
   useEffect(()=>{
     if (studio) return;                       // studierendering vinder, når nøglen er sat
     let alive = true;
-    fetchWikiImage(car.brand, car.model, car.wikipedia_title).then(url=>{
-      if (alive && url) { setSrc(url); setIsPhoto(true); }
+    fetchWikiImage(car.brand, car.model, car.wikipedia_title, variant).then(hit=>{
+      if (alive && hit) {
+        setSrc(hit.src); setIsPhoto(true);
+        // Vis hvilken bil billedet faktisk viser, så man selv kan se om det er
+        // den rigtige version — en GTI er ikke en almindelig Golf
+        setCaption(hit.title);
+      }
     });
     return ()=>{ alive = false; };
-  },[car.brand, car.model, car.wikipedia_title, studio]);
+  },[car.brand, car.model, car.wikipedia_title, variant, studio]);
 
   const box = {height:210,background:C.panel,borderRadius:14,border:`1px solid ${C.border}`,
     display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",marginBottom:18,position:"relative"};
-  const caption = {position:"absolute",bottom:8,right:12,color:C.dim,fontSize:11.5,fontWeight:500,
-    background:C.panel,borderRadius:6,padding:"2px 7px"};
+  const cap = {position:"absolute",bottom:8,right:12,color:C.dim,fontSize:11.5,fontWeight:500,
+    background:C.panel,borderRadius:6,padding:"2px 7px",maxWidth:"84%",overflow:"hidden",
+    textOverflow:"ellipsis",whiteSpace:"nowrap"};
 
-  // Slår billedet fejl, falder vi lydløst tilbage til tegningen
   if (src && isPhoto) return <div style={box}>
     <img src={src} alt={`${car.brand} ${car.model}`} loading="lazy"
-      onError={()=>{ setSrc(null); setIsPhoto(false); }}
+      onError={()=>{ setSrc(null); setIsPhoto(false); setCaption(""); }}
       style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-    <span style={caption}>{studio?"Illustrationsfoto":"Foto: Wikimedia"}</span>
+    <span style={cap} title={caption}>{caption}</span>
   </div>;
 
   return <div style={box}>
     <CarSilhouette body={car.body_type} paint={tint||C.accent} glass={C.panel} wheel={C.text}
-      style={{width:"88%",height:"88%"}}/>
-    <span style={caption}>{car.body_type||"Tegning"}</span>
+      style={{width:"86%",height:"86%"}}/>
+    <span style={cap}>{car.body_type||"Tegning"}</span>
   </div>;
 }
 
@@ -696,7 +820,7 @@ function DisclaimerBox() {
   </div>;
 }
 
-const RANK_LABEL = ["Bedste match","Alternativ","Prisfornuftigt","Overraskende"];
+const RANK_LABEL = ["Bedste match","Alternativ"];
 
 function CompareBox({cars}) {
   const C = useC();
@@ -761,7 +885,7 @@ function CarCard({car,form,onReject,rank=0,loading}) {
     </div>
 
     <div style={{padding:"22px 20px 0"}}>
-      <CarPhoto car={car} tint={color?color.hex:null}/>
+      <CarPhoto car={car} tint={color?color.hex:null} variant={variantTerm(form,car)}/>
       <div style={{marginBottom:18}}>
         <H size={2} style={{fontSize:"clamp(24px,3.4vw,30px)"}}>{car.brand} {car.model}</H>
         <div style={{color:C.muted,fontSize:15.5,marginTop:5}}>{[car.variant,car.year_range,car.hp?`${car.hp} hk`:null].filter(Boolean).join(" · ")}</div>
@@ -881,7 +1005,6 @@ function summarizeForm(f) {
     `Foretrukne mærker: ${(f.brands||[]).join(", ")||"–"} · Fravalgte: ${(f.excludeBrands||[]).join(", ")||"–"}`,
     `Gearkasse: ${f.transmission||"–"} · Anhængertræk: ${f.towbar||"–"}`,
     `Prioriteter: ${(f.priorities||[]).join(", ")||"–"}`,
-    `Særlige behov: ${f.extras||"–"}`,
   ].join("\n");
 }
 const summarizeCar = (c,label) => !c ? `${label}: ingen`
@@ -1311,15 +1434,15 @@ function App() {
   const [page,setPage] = useState("landing");   // landing | finder | pricing | about | contact
   const [step,setStep] = useState(0);
   const [maxReached,setMaxReached] = useState(0);
-  const [form,setForm] = useState({adults:"2",children:"0",childAges:"",region:"",budgetType:"kontant",budget:"",monthly:"",yearMin:"",kmMax:"",minHp:"",dailyKm:"",driveType:"",extras:"",character:"",variantWish:"",bodies:[],fuels:[],brands:[],excludeBrands:[],priorities:[],transmission:"",towbar:""});
+  const [form,setForm] = useState({adults:"2",children:"0",childAges:"",region:"",budgetType:"kontant",budget:"",monthly:"",yearMin:"",kmMax:"",minHp:"",dailyKm:"",driveType:"",character:"",variantWish:"",bodies:[],fuels:[],brands:[],excludeBrands:[],priorities:[],transmission:"",towbar:""});
   const [showResults,setShowResults] = useState(false);
   const [summary,setSummary] = useState("");
-  const [cards,setCards] = useState([null,null,null,null]);
-  const [loading,setLoading] = useState([false,false,false,false]);
-  const [failed,setFailed] = useState([false,false,false,false]);
-  const [failMsg,setFailMsg] = useState(["","","",""]);
+  const [cards,setCards] = useState([null,null]);
+  const [loading,setLoading] = useState([false,false]);
+  const [failed,setFailed] = useState([false,false]);
+  const [failMsg,setFailMsg] = useState(["",""]);
   const [error,setError] = useState("");
-  const [excluded,setExcluded] = useState([[],[],[],[]]);
+  const [excluded,setExcluded] = useState([[],[]]);
   const [lead,setLead] = useState(null);
   const set = k => v => setForm(f=>({...f,[k]:v}));
 
@@ -1349,28 +1472,28 @@ function App() {
 
   async function runSearch(excl) {
     setShowResults(true); setMaxReached(5);
-    setCards([null,null,null,null]);
-    setLoading([true,true,true,true]);
-    setFailed([false,false,false,false]);
-    setFailMsg(["","","",""]);
+    setCards([null,null]);
+    setLoading([true,true]);
+    setFailed([false,false]);
+    setFailMsg(["",""]);
     setError("");
     top();
 
     let first = null;
     try {
       first = await fetchSlot(1, excl[0], "");
-      setCards(c=>[first,c[1],c[2],c[3]]);
-      setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I tre bevidst anderledes bud.`);
+      setCards(c=>[first,c[1]]);
+      setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I et bevidst anderledes alternativ.`);
     } catch(e) {
-      setFailed(f=>[true,f[1],f[2],f[3]]);
-      setFailMsg(m=>[e.hint||e.message||"",m[1],m[2],m[3]]);
+      setFailed(f=>[true,f[1]]);
+      setFailMsg(m=>[e.hint||e.message||"",m[1]]);
     }
-    setLoading(l=>[false,l[1],l[2],l[3]]);
+    setLoading(l=>[false,l[1]]);
 
     const firstName = first ? `${first.brand} ${first.model}` : "";
     const taken = new Set([carKey(first)].filter(Boolean));
 
-    await Promise.all([2,3,4].map(async rank => {
+    await Promise.all([2].map(async rank => {
       const idx = rank-1;
       const avoid = [...excl[idx], ...excl[0], firstName].filter(Boolean);
       try {
@@ -1461,78 +1584,87 @@ function App() {
         {page==="contact" && <ContactPage/>}
 
         {page==="finder" && !showResults && <>
-          <div style={{margin:"32px 0 26px"}}>
+          <div style={{margin:"26px 0 20px"}}>
             <p style={{color:C.accent,fontSize:14.5,fontWeight:600,letterSpacing:".04em",marginBottom:10}}>Trin {step+1} af 5</p>
             <H size={2} style={{marginBottom:8}}>{S.title}</H>
             <p style={{color:C.muted,fontSize:17.5}}>{S.sub}</p>
           </div>
 
-          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:20,padding:"28px 24px 6px",animation:"fadeUp .3s ease"}}>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:20,padding:"24px 22px 4px",animation:"fadeUp .3s ease"}}>
             {step===0 && <>
-              <Field label="Antal voksne"><SingleChips options={["1","2","3","4+"]} value={form.adults} onChange={set("adults")}/></Field>
-              <Field label="Antal børn"><SingleChips options={["0","1","2","3","4+"]} value={form.children} onChange={set("children")}/></Field>
-              {form.children!=="0"&&form.children!=="" && <Field label="Børnenes aldre" hint="valgfrit"><TxtInput value={form.childAges} onChange={set("childAges")} placeholder="F.eks. 3, 7, 12"/></Field>}
+              <Field label="Antal voksne" required><SingleChips options={["1","2","3","4+"]} value={form.adults} onChange={set("adults")}/></Field>
+              <Field label="Antal børn" required><SingleChips options={["0","1","2","3","4+"]} value={form.children} onChange={set("children")}/></Field>
+              {form.children!=="0"&&form.children!=="" && <Field label="Børnenes aldre"><TxtInput value={form.childAges} onChange={set("childAges")} placeholder="F.eks. 3, 7, 12"/></Field>}
               <Field label="Hvor i landet bor I?"><SingleDropdown value={form.region} onChange={set("region")} options={REGIONS} placeholder="Vælg område"/></Field>
             </>}
 
             {step===1 && <>
-              <Field label="Betalingsform"><SingleChips options={["kontant","månedlig"]} value={form.budgetType} onChange={set("budgetType")}/></Field>
+              <Field label="Betalingsform" required><SingleChips options={["kontant","månedlig"]} value={form.budgetType} onChange={set("budgetType")}/></Field>
               {form.budgetType==="månedlig"
-                ? <Field label="Månedlig ydelse"><NumInput value={form.monthly} onChange={set("monthly")} placeholder="F.eks. 4500" suffix="kr./md."/></Field>
-                : <Field label="Kontantbudget"><NumInput value={form.budget} onChange={set("budget")} placeholder="F.eks. 350000" suffix="kr."/></Field>}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:18}}>
-                <Field label="Tidligste årsmodel" hint="valgfrit"><NumInput value={form.yearMin} onChange={set("yearMin")} placeholder="F.eks. 2018"/></Field>
-                <Field label="Maks km-stand" hint="valgfrit"><NumInput value={form.kmMax} onChange={set("kmMax")} placeholder="F.eks. 100000" suffix="km"/></Field>
+                ? <Field label="Månedlig ydelse" required><NumInput value={form.monthly} onChange={set("monthly")} placeholder="F.eks. 4500" suffix="kr./md."/></Field>
+                : <Field label="Kontantbudget" required><NumInput value={form.budget} onChange={set("budget")} placeholder="F.eks. 350000" suffix="kr."/></Field>}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16}}>
+                <Field label="Tidligste årsmodel"><NumInput value={form.yearMin} onChange={set("yearMin")} placeholder="F.eks. 2018"/></Field>
+                <Field label="Maks km-stand"><NumInput value={form.kmMax} onChange={set("kmMax")} placeholder="F.eks. 100000" suffix="km"/></Field>
               </div>
             </>}
 
             {step===2 && <>
-              <Field label="Hvor mange km kører I om dagen?"><NumInput value={form.dailyKm} onChange={set("dailyKm")} placeholder="F.eks. 40" suffix="km/dag"/></Field>
+              <Field label="Hvor mange km kører I om dagen?" required><NumInput value={form.dailyKm} onChange={set("dailyKm")} placeholder="F.eks. 40" suffix="km/dag"/></Field>
               <Field label="Hvor kører I mest?"><SingleChips options={["Primært by","Blandet","Primært motorvej"]} value={form.driveType} onChange={set("driveType")}/></Field>
-              <Field label="Særlige behov" hint="valgfrit"><TxtInput value={form.extras} onChange={set("extras")} placeholder="Anhænger, barnevogn, hunde…"/></Field>
             </>}
 
             {step===3 && <>
-              <Field label="Karosseri" hint="vælg gerne flere"><MultiChips options={BODY_TYPES} value={form.bodies} onChange={set("bodies")}/></Field>
+              <Field label="Karosseri" hint="vælg gerne flere"><BodyTypePicker value={form.bodies} onChange={set("bodies")}/></Field>
               <Field label="Drivmiddel" hint="vælg gerne flere"><MultiChips options={FUEL_TYPES} value={form.fuels} onChange={set("fuels")}/></Field>
-              <Field label="Mærker I gerne vil have" hint="skriv eller vælg" help="Skriv de første bogstaver, så finder vi mærket — alle mærker på det danske marked er med.">
+              <Field label="Mærker I gerne vil have" hint="skriv eller vælg">
                 <SearchableMultiSelect value={form.brands} onChange={set("brands")} options={BRANDS} placeholder="Skriv f.eks. “sko” for Skoda…"/>
               </Field>
-              <Field label="Mærker I helst vil undgå" hint="valgfrit">
+              <Field label="Mærker I helst vil undgå">
                 <SearchableMultiSelect value={form.excludeBrands} onChange={set("excludeBrands")} options={BRANDS} placeholder="Skriv et mærke…"/>
               </Field>
             </>}
 
             {step===4 && <>
-              <Field label="Hvad betyder mest?" hint="vælg gerne flere"><MultiChips options={PRIORITIES} value={form.priorities} onChange={set("priorities")}/></Field>
-              <Field label="Bilens karakter" hint="valgfrit" help="Vælg “Sporty / performance”, hvis I leder efter sportsversioner som vRS, RS, GTI, ST, N eller AMG.">
+              <Field label="Hvad betyder mest?" hint="vælg gerne flere i hver gruppe">
+                <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                  {PRIORITY_GROUPS.map(([gruppe,items])=>
+                    <div key={gruppe}>
+                      <div style={{color:C.muted,fontSize:12.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",marginBottom:8}}>{gruppe}</div>
+                      <MultiChips options={items} value={form.priorities} onChange={set("priorities")}/>
+                    </div>)}
+                </div>
+              </Field>
+              <Field label="Bilens karakter" help="Vælg “Sporty / performance”, hvis I leder efter sportsversioner som vRS, RS, GTI, ST, N eller AMG.">
                 <SingleChips options={CHARACTERS} value={form.character} onChange={set("character")}/>
               </Field>
-              <Field label="Bestemt motor eller udstyrsvariant?" hint="valgfrit" help="Kender I betegnelsen, så skriv den — f.eks. “vRS”, “R.S. Line”, “GTI”, “AMG Line” eller “2.0 TDI 190”.">
+              <Field label="Bestemt motor eller udstyrsvariant?" help="Kender I betegnelsen, så skriv den — f.eks. “vRS”, “R.S. Line”, “GTI”, “AMG Line” eller “2.0 TDI 190”.">
                 <TxtInput value={form.variantWish} onChange={set("variantWish")} placeholder="F.eks. vRS, RS, GTI, AMG…"/>
               </Field>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:18}}>
-                <Field label="Mindste motoreffekt" hint="valgfrit"><NumInput value={form.minHp} onChange={set("minHp")} placeholder="F.eks. 230" suffix="hk"/></Field>
-                <Field label="Gearkasse" hint="valgfrit"><SingleChips options={["Automatgear","Manuel","Ligemeget"]} value={form.transmission} onChange={set("transmission")}/></Field>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16}}>
+                <Field label="Mindste motoreffekt"><NumInput value={form.minHp} onChange={set("minHp")} placeholder="F.eks. 230" suffix="hk"/></Field>
+                <Field label="Gearkasse"><SingleChips options={["Automatgear","Manuel","Ligemeget"]} value={form.transmission} onChange={set("transmission")}/></Field>
               </div>
-              <Field label="Anhængertræk?" hint="valgfrit"><SingleChips options={["Ja, vigtigt","Rart at have","Nej tak"]} value={form.towbar} onChange={set("towbar")}/></Field>
+              <Field label="Anhængertræk?"><SingleChips options={["Ja, vigtigt","Rart at have","Nej tak"]} value={form.towbar} onChange={set("towbar")}/></Field>
             </>}
           </div>
 
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:28,gap:13,flexWrap:"wrap"}}>
+          <div style={{position:"sticky",bottom:0,zIndex:110,background:C.bg,
+            borderTop:`1px solid ${C.border}`,marginTop:20,padding:"14px 0 16px",
+            display:"flex",justifyContent:"space-between",alignItems:"center",gap:13,flexWrap:"wrap"}}>
             {step>0 ? <Btn kind="ghost" onClick={()=>goStep(step-1)}>← Tilbage</Btn> : <span/>}
             {step<4
               ? <Btn onClick={next} disabled={!canNext(step)} size="lg">Næste →</Btn>
-              : <Btn onClick={()=>runSearch([[],[],[],[]])} size="lg">Find vores bil</Btn>}
+              : <Btn onClick={()=>runSearch([[],[]])} size="lg">Find vores bil</Btn>}
           </div>
-          {!canNext(step) && <p style={{color:C.muted,fontSize:15,textAlign:"right",marginTop:11}}>Udfyld felterne ovenfor for at komme videre.</p>}
+          {!canNext(step) && <p style={{color:C.muted,fontSize:15,textAlign:"right",marginTop:4}}>Udfyld felterne markeret “skal udfyldes”.</p>}
         </>}
 
         {page==="finder" && showResults && <div style={{paddingTop:30}}><Results
           cards={cards} loading={loading} failed={failed} failMsg={failMsg} onRetry={retrySlot}
           form={form} summary={summary} onReject={handleReject}
           onPickService={s=>setLead(s)}
-          onRefresh={()=>{setShowResults(false);setCards([null,null,null,null]);setFailed([false,false,false,false]);setSummary("");setExcluded([[],[],[],[]]);setStep(4);top();}}
+          onRefresh={()=>{setShowResults(false);setCards([null,null]);setFailed([false,false]);setSummary("");setExcluded([[],[]]);setStep(4);top();}}
         /></div>}
 
         {error && <p role="alert" style={{color:C.bad,fontSize:16,textAlign:"center",marginTop:20,background:C.surface,border:`1px solid ${C.accentBorder}`,borderRadius:14,padding:"14px 18px"}}>{error}</p>}

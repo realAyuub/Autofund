@@ -69,8 +69,39 @@ trin hvis et led ikke svarer:
    søgning frem for et præcist titelopslag. Danske modelnavne rammer sjældent
    en artikeltitel: "BMW 1-serie" hedder "BMW 1 Series" på engelsk. AI'en
    leverer desuden et `wikipedia_title` som første gæt. Gratis, ingen nøgle.
-3. **Tegning** — en silhuet i tre karosseriformer, så en stationcar ikke
-   tegnes som en SUV.
+3. **Tegning** — en silhuet per karosseritype. De samme tegninger bruges som
+   ikoner, når man vælger karosseri, så man ikke skal vide hvad en MPV er.
+
+Tegningerne er bygget på ét fælles gitter i `CAR_SHAPES`: vejbanen ligger på
+y=77 for alle, og hjulcentrum på y=77−r, så bilerne står på samme linje. Hver
+bil er tegnet i sin rigtige indbyrdes størrelse — en mikrobil fylder mindre i
+rammen end en pickup — så størrelsesrækkefølgen kan ses.
+
+Det der adskiller typerne er tre tal: dørtærsklens højde (frihøjden), taghøjden
+og vinduernes underkant. En stationcar er lav og lang med et stort
+vinduesareal; en SUV er høj med store hjul og et dybt karosseri.
+
+Hjulkassen centreres om **hjulet**, ikke om dørtærsklen. Gør man det modsatte,
+bliver ringen tykkere foroven end i siderne, og buen ser ud som en bule.
+
+## Karosserikategorier
+
+Kategorierne følger **Bilbasens egne**, så filteret rammer det de faktisk
+sorterer efter: Mikro, Hatchback, Coupe, Cabriolet, Sedan, Crossover (CUV),
+Stationcar, SUV, Minibus (MPV), Pickup. DBA bruger de samme betegnelser, men
+andre URL-koder (`body_type=4` er Stationcar hos dem), så koderne kan ikke
+genbruges på tværs.
+
+Listen står ét sted, i `BODY_TYPES` i `app.jsx`, og `check-schema.js`
+kontrollerer at `body_type`-enum'et i API-skemaet er identisk. Ellers kan
+modellen returnere en type som tegningerne ikke kender.
+
+**Billedet kontrolleres.** Vi kan ikke se hvad der er på et foto, men vi kan
+se hvilken artikel det kommer fra. Et foto godtages kun hvis artiklens titel
+indeholder både mærket og modellen — ellers vises tegningen frem for et
+billede af en anden bil. Findes der en artikel om netop varianten, foretrækkes
+den, fordi en GTI ser markant anderledes ud end en almindelig Golf. Artiklens
+navn står i hjørnet af billedet, så man selv kan se hvad man kigger på.
 
 ## Bilbasen-søgninger
 
@@ -95,10 +126,10 @@ Appen byggede tidligere den sidste form. Derfor:
 
 Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*.
 
-## Fire forslag ad gangen
+## To forslag ad gangen
 
-Forslag 1 hentes først og vises med det samme. De tre øvrige hentes derefter
-parallelt, hver med sin vinkel (alternativ, prisfornuftigt, overraskende).
+Forslag 1 hentes først og vises med det samme. Alternativet hentes derefter og
+skal være et andet mærke og enten anden karosseriform eller andet drivmiddel.
 
 Et kald der bliver afvist prøves automatisk igen to gange med stigende
 ventetid. Lykkes det stadig ikke — eller kommer den samme bil igen som et af
@@ -123,3 +154,7 @@ efter ændringer i skemaet; den fanger det.
   fdm.dk afviser automatiseret adgang.
 - **Wikipedia-billederne.** Koden og begge fallback-veje er testet, men
   Wikipedias faktiske svar er ikke, af samme grund.
+- **`cartypes`-værdierne til Bilbasen.** Kun værdier vi har belæg for står i
+  `BB_BODY`. Mikro og Crossover (CUV) er udeladt, fordi deres filterværdi ikke
+  er bekræftet — vælger man dem, udelades karosserifilteret fra den brede
+  søgning i stedet for at sende et gæt. Kan værdierne bekræftes, tilføjes de.
