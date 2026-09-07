@@ -274,17 +274,24 @@ async function fetchOneCar(profile, tries=3) {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ profile }),
       });
-      if (res.status === 429 || res.status >= 500) {          // værd at prøve igen
-        lastErr = new Error("API " + res.status);
-        continue;
+      if (!res.ok) {
+        // Serveren forklarer hvad der gik galt — den forklaring skal helt op
+        // på skærmen, så en manglende API-nøgle ikke ligner et tilfældigt hikke.
+        let hint = "";
+        try { hint = (await res.json()).hint || ""; } catch (e) {}
+        const err = new Error(hint || ("Serverfejl " + res.status));
+        err.hint = hint;
+        err.permanent = res.status >= 400 && res.status < 500 && res.status !== 429;
+        lastErr = err;
+        if (err.permanent) break;                 // nytter ikke at gentage
+        continue;                                  // 429 og 5xx: prøv igen
       }
-      if (!res.ok) throw new Error("API " + res.status);       // 4xx: nytter ikke at gentage
       const data = await res.json();
-      if (!data.car || !data.car.brand) throw new Error("Ufuldstændigt svar");
+      if (!data.car || !data.car.brand) throw new Error("Ufuldstændigt svar fra serveren");
       return data.car;
     } catch (e) {
       lastErr = e;
-      if (String(e.message).startsWith("API 4")) break;
+      if (e.permanent) break;
     }
   }
   throw lastErr || new Error("Ukendt fejl");
@@ -1028,21 +1035,21 @@ function HelpSection({onPick}) {
 
 /* Et forslag der ikke kunne hentes. Vises som et rigtigt kort med en
    forklaring, så pladsen ikke bare står tom. */
-function FailedCard({rank,onRetry}) {
+function FailedCard({rank,msg,onRetry}) {
   const C = useC();
   return <div style={{background:C.surface,border:`1px dashed ${C.border2}`,borderRadius:18,
     padding:"40px 24px",textAlign:"center"}}>
     <div style={{color:C.text,fontSize:17,fontWeight:600,marginBottom:8}}>
       {RANK_LABEL[rank]||`Forslag ${rank+1}`} kunne ikke hentes
     </div>
-    <p style={{color:C.muted,fontSize:15.5,lineHeight:1.6,marginBottom:20,maxWidth:"34ch",marginLeft:"auto",marginRight:"auto"}}>
-      Det sker en sjælden gang, når der er tryk på. De øvrige forslag er ikke berørt.
+    <p style={{color:C.muted,fontSize:15.5,lineHeight:1.6,marginBottom:20,maxWidth:"36ch",marginLeft:"auto",marginRight:"auto"}}>
+      {msg || "De øvrige forslag er ikke berørt."}
     </p>
     <Btn kind="ghost" size="sm" onClick={onRetry}>Prøv dette forslag igen</Btn>
   </div>;
 }
 
-function Results({cards,loading,failed,onRetry,form,onReject,onRefresh,summary,onPickService}) {
+function Results({cards,loading,failed,failMsg,onRetry,form,onReject,onRefresh,summary,onPickService}) {
   const C = useC();
   const busy = loading.some(Boolean);
   const shown = cards.filter(Boolean);
@@ -1054,7 +1061,7 @@ function Results({cards,loading,failed,onRetry,form,onReject,onRefresh,summary,o
     {/* To ad gangen på skærme der har plads, ellers under hinanden */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,420px),1fr))",gap:18,alignItems:"start"}}>
       {cards.map((car,i)=> failed[i] && !loading[i]
-        ? <FailedCard key={i} rank={i} onRetry={()=>onRetry(i)}/>
+        ? <FailedCard key={i} rank={i} msg={failMsg[i]} onRetry={()=>onRetry(i)}/>
         : <CarCard key={i} car={car} form={form} rank={i} loading={loading[i]}
             onReject={!loading[i]&&car?()=>onReject(i):null}/>)}
     </div>
@@ -1310,6 +1317,7 @@ function App() {
   const [cards,setCards] = useState([null,null,null,null]);
   const [loading,setLoading] = useState([false,false,false,false]);
   const [failed,setFailed] = useState([false,false,false,false]);
+  const [failMsg,setFailMsg] = useState(["","","",""]);
   const [error,setError] = useState("");
   const [excluded,setExcluded] = useState([[],[],[],[]]);
   const [lead,setLead] = useState(null);
@@ -1344,6 +1352,7 @@ function App() {
     setCards([null,null,null,null]);
     setLoading([true,true,true,true]);
     setFailed([false,false,false,false]);
+    setFailMsg(["","","",""]);
     setError("");
     top();
 
@@ -1354,6 +1363,7 @@ function App() {
       setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I tre bevidst anderledes bud.`);
     } catch(e) {
       setFailed(f=>[true,f[1],f[2],f[3]]);
+      setFailMsg(m=>[e.hint||e.message||"",m[1],m[2],m[3]]);
     }
     setLoading(l=>[false,l[1],l[2],l[3]]);
 
@@ -1374,6 +1384,7 @@ function App() {
         setCards(c=>c.map((v,i)=>i===idx?car:v));
       } catch(e) {
         setFailed(f=>f.map((v,i)=>i===idx?true:v));
+        setFailMsg(m=>m.map((v,i)=>i===idx?(e.hint||e.message||""):v));
       } finally {
         setLoading(l=>l.map((v,i)=>i===idx?false:v));
       }
@@ -1391,6 +1402,7 @@ function App() {
       setCards(c=>c.map((v,i)=>i===idx?car:v));
     } catch(e) {
       setFailed(f=>f.map((v,i)=>i===idx?true:v));
+      setFailMsg(m=>m.map((v,i)=>i===idx?(e.hint||e.message||""):v));
     }
     setLoading(l=>l.map((v,i)=>i===idx?false:v));
   }
@@ -1517,7 +1529,7 @@ function App() {
         </>}
 
         {page==="finder" && showResults && <div style={{paddingTop:30}}><Results
-          cards={cards} loading={loading} failed={failed} onRetry={retrySlot}
+          cards={cards} loading={loading} failed={failed} failMsg={failMsg} onRetry={retrySlot}
           form={form} summary={summary} onReject={handleReject}
           onPickService={s=>setLead(s)}
           onRefresh={()=>{setShowResults(false);setCards([null,null,null,null]);setFailed([false,false,false,false]);setSummary("");setExcluded([[],[],[],[]]);setStep(4);top();}}
