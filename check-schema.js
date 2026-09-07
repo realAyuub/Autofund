@@ -36,7 +36,21 @@ const fejl = [];
   }
 })(schema, "schema");
 
-console.log(`Felter: ${Object.keys(schema.properties).length} · required: ${schema.required.length}`);
+// Karosserilisten i appen og enum'et i skemaet skal være ens, ellers kan
+// modellen returnere en type som tegningerne ikke kender.
+const appSrc = fs.readFileSync(path.join(__dirname, "app.jsx"), "utf8");
+const m2 = appSrc.match(/const BODY_TYPES = \[([^\]]*)\]/);
+if (m2) {
+  const appTypes = JSON.parse("[" + m2[1] + "]");
+  const enumTypes = schema.properties.body_type.enum || [];
+  const kunApp = appTypes.filter(t => !enumTypes.includes(t));
+  const kunApi = enumTypes.filter(t => !appTypes.includes(t));
+  if (kunApp.length || kunApi.length) {
+    fejl.push(`body_type er ude af trit med app.jsx — kun i appen: [${kunApp}] · kun i skemaet: [${kunApi}]`);
+  }
+}
+
+console.log(`Felter: ${Object.keys(schema.properties).length} · required: ${schema.required.length} · karosserityper: ${(schema.properties.body_type.enum||[]).length}`);
 if (fejl.length) {
   console.error("\nSkemaet vil give 400 fra API'et:");
   fejl.forEach(f => console.error("  ✗", f));
