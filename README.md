@@ -126,6 +126,13 @@ Appen byggede tidligere den sidste form. Derfor:
 
 Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*.
 
+## Udstyrsvariant
+
+Bilkortet fortæller hvilken udstyrslinje man skal lede efter, og hvorfor —
+knyttet til brugerens egne svar. Man vælger ikke udstyr fra et katalog når man
+køber brugt, så feltet er skrevet som en indkøbsseddel: hvad man skal insistere
+på i annoncen, og hvad man ikke skal betale ekstra for. Ligger i `trim_advice`.
+
 ## To forslag ad gangen
 
 Forslag 1 hentes først og vises med det samme. Alternativet hentes derefter og

@@ -910,6 +910,37 @@ function CarCard({car,form,onReject,rank=0,loading}) {
         <ColorPalette colors={car.colors_dk} selected={color} onSelect={setColor}/>
       </Panel>}
 
+      {/* Indkøbsseddel til annoncen. På brugtmarkedet vælger man ikke udstyr
+          fra et katalog — man leder efter de rigtige eksemplarer. */}
+      {car.trim_advice && car.trim_advice.recommended && <Panel title="Hvilken udstyrsvariant?">
+        <div style={{marginBottom:12}}>
+          <span style={{color:C.accent,fontSize:19,fontWeight:600,fontFamily:DISPLAY}}>{car.trim_advice.recommended}</span>
+          {car.trim_advice.why && <p style={{color:C.text,fontSize:16,lineHeight:1.65,marginTop:6}}>{car.trim_advice.why}</p>}
+        </div>
+        {Array.isArray(car.trim_advice.must_have) && car.trim_advice.must_have.length>0 && <div style={{marginBottom:14}}>
+          <div style={{color:C.good,fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Insistér på</div>
+          {car.trim_advice.must_have.filter(x=>x&&x.item).map((x,i)=>
+            <div key={i} style={{display:"flex",gap:9,marginBottom:8,alignItems:"flex-start"}}>
+              <span style={{color:C.good,fontSize:13,marginTop:3}}>✓</span>
+              <span style={{fontSize:15.5,lineHeight:1.55}}>
+                <b style={{color:C.text,fontWeight:600}}>{x.item}</b>
+                {x.why && <span style={{color:C.muted}}> — {x.why}</span>}
+              </span>
+            </div>)}
+        </div>}
+        {Array.isArray(car.trim_advice.skip) && car.trim_advice.skip.length>0 && <div>
+          <div style={{color:C.muted,fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Betal ikke ekstra for</div>
+          {car.trim_advice.skip.filter(x=>x&&x.item).map((x,i)=>
+            <div key={i} style={{display:"flex",gap:9,marginBottom:8,alignItems:"flex-start"}}>
+              <span style={{color:C.dim,fontSize:13,marginTop:3}}>–</span>
+              <span style={{fontSize:15.5,lineHeight:1.55}}>
+                <b style={{color:C.text,fontWeight:600}}>{x.item}</b>
+                {x.why && <span style={{color:C.muted}}> — {x.why}</span>}
+              </span>
+            </div>)}
+        </div>}
+      </Panel>}
+
       {car.fdm_verdict && <Panel title="FDM’s vurdering" tone="accent">
         <p style={{color:C.text,fontSize:16,lineHeight:1.7,marginBottom:11}}>{car.fdm_verdict}</p>
         <a href={FDM_SEARCH(`${car.brand} ${car.model} test`)} target="_blank" rel="noopener noreferrer"
