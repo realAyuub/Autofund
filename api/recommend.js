@@ -39,6 +39,20 @@ KAROSSERI: Brug den kategori bilen sælges under i Danmark. "Mikro" er de
 mindste bybiler. "Crossover (CUV)" er en hævet hatchback — mindre og lavere end
 en SUV. "Minibus (MPV)" er en høj etrumsbil med plads til mange.
 
+UDSTYRSVARIANT — trim_advice: Man vælger ikke udstyr fra et katalog når man køber
+brugt; man leder efter de rigtige eksemplarer blandt dem der er til salg. Skriv
+derfor en indkøbsseddel, ikke en katalogbeskrivelse.
+- "recommended" er den udstyrslinje der giver bedst værdi for NETOP denne familie,
+  med modellens rigtige danske navn på linjen (f.eks. "Ambition", "Style",
+  "R-Line"). Kender du ikke linjenavnene, så beskriv niveauet i stedet.
+- "must_have" er 2-4 ting de skal insistere på, og hver begrundelse SKAL knytte
+  an til noget de faktisk har svaret: mange motorvejskilometer, børn i bilen,
+  anhænger, automatgear, kort ladetid.
+- "skip" er 2-3 ting man typisk betaler for meget for på brugtmarkedet, eller som
+  koster mere i drift end de giver. Store fælge, panoramatag og luftaffjedring er
+  klassiske eksempler — men vælg dem der passer til modellen.
+- Nævn udstyr der holder på værdien ved videresalg, hvis det er relevant.
+
 SPROG: Alt indhold skrives på dansk, i et roligt og konkret sprog uden fagudtryk. Skriv til en person der ikke interesserer sig for biler.
 
 colors_dk: 4-8 lakfarver modellen faktisk blev solgt i hos danske forhandlere i perioden. Brug producentens EGNE farvenavne ("Race Blue", "Corrida Red"), ikke generiske ord som "blå". "hex" skal være den farve lakken reelt ser ud som. Kender du ikke de officielle navne, så returner en tom liste frem for at finde på dem.
@@ -68,7 +82,7 @@ const CAR_SCHEMA = {
     "price_new_dkk","price_used_dkk","fuel_type","fuel_cost_monthly","resale",
     "pros","cons","safety_rating","reliability","colors_dk",
     "bilbasen_brand_slug","bilbasen_model_slug","bilbasen_search_term",
-    "imagin_make","imagin_model_family","wikipedia_title",
+    "imagin_make","imagin_model_family","wikipedia_title","trim_advice",
   ],
   properties: {
     brand: { type: "string" },
@@ -115,6 +129,24 @@ const CAR_SCHEMA = {
     imagin_make: { type: "string" },
     imagin_model_family: { type: "string" },
     wikipedia_title: { type: "string" },
+    trim_advice: {
+      type: "object", additionalProperties: false,
+      required: ["recommended","why","must_have","skip"],
+      properties: {
+        recommended: { type: "string", description: "Den udstyrslinje man skal lede efter, f.eks. \"Ambition\" eller \"Style\"" },
+        why: { type: "string", description: "1-2 sætninger om hvorfor netop den passer til DENNE families svar" },
+        must_have: {
+          type: "array", description: "2-4 ting man skal insistere på i annoncen",
+          items: { type: "object", additionalProperties: false, required: ["item","why"],
+            properties: { item: { type: "string" }, why: { type: "string", description: "Kort begrundelse knyttet til familiens svar" } } },
+        },
+        skip: {
+          type: "array", description: "2-3 ting man IKKE skal betale ekstra for",
+          items: { type: "object", additionalProperties: false, required: ["item","why"],
+            properties: { item: { type: "string" }, why: { type: "string" } } },
+        },
+      },
+    },
   },
 };
 
