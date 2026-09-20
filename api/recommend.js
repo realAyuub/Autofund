@@ -11,11 +11,19 @@
 // Miljøvariabler:
 //   ANTHROPIC_API_KEY   påkrævet
 //   CLAUDE_MODEL        valgfri, standard claude-opus-5
-//   CLAUDE_EFFORT       valgfri, standard high (low | medium | high | xhigh | max)
+//   CLAUDE_EFFORT       valgfri, standard medium (low | medium | high | xhigh | max)
+//
+// HASTIGHED: "effort" er den knap der betyder mest for ventetiden. Den styrer
+// hvor længe modellen tænker, før den svarer, og tænkningen er langt det meste
+// af de sekunder brugeren sidder og kigger på en spinner. Standarden i API'et
+// er "high"; her står den på "medium", fordi opgaven er afgrænset — find én bil
+// der passer til et skema — og ikke et åbent researchproblem. Vil man have den
+// grundigere igen, sættes CLAUDE_EFFORT=high i Vercel. Vil man have den endnu
+// hurtigere, er CLAUDE_MODEL=claude-sonnet-5 det næste skridt.
 const Anthropic = require("@anthropic-ai/sdk");
 
 const MODEL  = process.env.CLAUDE_MODEL  || "claude-opus-5";
-const EFFORT = process.env.CLAUDE_EFFORT || "high";
+const EFFORT = process.env.CLAUDE_EFFORT || "medium";
 
 const SYSTEM = `Du er Danmarks bedste uafhængige bilrådgiver. Du kender det danske brugtbilmarked, danske priser, afgifter og hvad der reelt står til salg på Bilbasen.
 
@@ -182,15 +190,19 @@ module.exports = async function handler(req, res) {
     }
 
     const client = new Anthropic();
-    const message = await client.messages.create({
+    // Svaret streames. Ikke for at vise det løbende — vi skal bruge hele
+    // JSON'en, før der kan tegnes et bilkort — men fordi et almindeligt kald
+    // med et højt max_tokens kan løbe ind i en HTTP-timeout undervejs og dø
+    // uden svar. Når der kommer data på linjen hele tiden, sker det ikke.
+    const stream = client.messages.stream({
       model: MODEL,
       // Tænkning er slået til som standard på Opus 5, og de tokens tæller med i
       // det SAMME budget som svaret. Et lavt loft betyder derfor ikke "et kort
       // svar" — det betyder at JSON'en bliver klippet over midt i, og så er
       // hele svaret ubrugeligt. Skemaet her er stort, så der skal være luft.
       max_tokens: 16000,
-      // Systemprompten er ens for alle fire kald i en søgning — cachet er den
-      // næsten gratis fra kald nummer to.
+      // Systemprompten er ens for begge kald i en søgning — cachet er den
+      // næsten gratis i kald nummer to.
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
       output_config: {
         effort: EFFORT,
@@ -198,6 +210,7 @@ module.exports = async function handler(req, res) {
       },
       messages: [{ role: "user", content: profile }],
     });
+    const message = await stream.finalMessage();
 
     if (message.stop_reason === "refusal") {
       console.error("REFUSAL", message.stop_details);
