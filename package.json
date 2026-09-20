@@ -2,7 +2,15 @@
   "name": "autofund",
   "private": true,
   "description": "Uafhængig bilrådgivning",
+  "scripts": {
+    "bundle": "esbuild app.jsx --bundle --minify --format=iife --target=es2018 --jsx=automatic --define:process.env.NODE_ENV='\"production\"' --outfile=app.js"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   }
 }
