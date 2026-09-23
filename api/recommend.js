@@ -10,19 +10,24 @@
 //
 // Miljøvariabler:
 //   ANTHROPIC_API_KEY   påkrævet
-//   CLAUDE_MODEL        valgfri, standard claude-opus-5
+//   CLAUDE_MODEL        valgfri, standard claude-sonnet-5
 //   CLAUDE_EFFORT       valgfri, standard medium (low | medium | high | xhigh | max)
 //
-// HASTIGHED: "effort" er den knap der betyder mest for ventetiden. Den styrer
-// hvor længe modellen tænker, før den svarer, og tænkningen er langt det meste
-// af de sekunder brugeren sidder og kigger på en spinner. Standarden i API'et
-// er "high"; her står den på "medium", fordi opgaven er afgrænset — find én bil
-// der passer til et skema — og ikke et åbent researchproblem. Vil man have den
-// grundigere igen, sættes CLAUDE_EFFORT=high i Vercel. Vil man have den endnu
-// hurtigere, er CLAUDE_MODEL=claude-sonnet-5 det næste skridt.
+// HASTIGHED. To knapper, og begge kan skrues på uden at røre koden:
+//
+//   MODEL — Sonnet svarer hurtigere end Opus og koster under det halve. Opgaven
+//   her er afgrænset: find én bil der passer til et skema, og udfyld felterne.
+//   Det er ikke et åbent researchproblem, og forskellen på de to modeller viser
+//   sig først for alvor på den slags. Vil du sammenligne selv, så sæt
+//   CLAUDE_MODEL=claude-opus-5 i Vercel og kør en søgning med hver.
+//
+//   EFFORT — styrer hvor længe modellen tænker, før den svarer, og tænkningen
+//   er langt det meste af de sekunder brugeren kigger på en spinner. API'ets
+//   egen standard er "high"; her står den på "medium". CLAUDE_EFFORT=low er
+//   hurtigst, =high er grundigst.
 const Anthropic = require("@anthropic-ai/sdk");
 
-const MODEL  = process.env.CLAUDE_MODEL  || "claude-opus-5";
+const MODEL  = process.env.CLAUDE_MODEL  || "claude-sonnet-5";
 const EFFORT = process.env.CLAUDE_EFFORT || "medium";
 
 const SYSTEM = `Du er Danmarks bedste uafhængige bilrådgiver. Du kender det danske brugtbilmarked, danske priser, afgifter og hvad der reelt står til salg på Bilbasen.

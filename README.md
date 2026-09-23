@@ -52,7 +52,7 @@ Sættes i Vercel under Settings → Environment Variables.
 | Variabel | Krævet | Betydning |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Ja | API-nøgle til Claude. |
-| `CLAUDE_MODEL` | Nej | Standard er `claude-opus-5`. `claude-sonnet-5` er hurtigere og billigere. |
+| `CLAUDE_MODEL` | Nej | Standard er `claude-sonnet-5`. `claude-opus-5` er grundigere, men langsommere og dyrere. |
 | `CLAUDE_EFFORT` | Nej | Standard `medium`. `low` er hurtigst, `high` er grundigst. |
 | `RESEND_API_KEY` | Nej | Sender forespørgsler som e-mail. |
 | `LEAD_TO_EMAIL` | Nej | Modtageradressen. |
@@ -144,8 +144,9 @@ Tre ting bestemmer hvor længe brugeren kigger på en spinner:
 1. **`CLAUDE_EFFORT`** er den største knap. Den styrer hvor længe modellen
    tænker før den svarer, og tænkningen er det meste af ventetiden. Står på
    `medium`. `low` er mærkbart hurtigere; `high` er grundigere.
-2. **Modellen.** `claude-sonnet-5` svarer hurtigere end `claude-opus-5` og
-   koster under det halve. Sættes i `CLAUDE_MODEL` — ingen kodeændring.
+2. **Modellen.** Standarden er `claude-sonnet-5`, som svarer hurtigere end
+   `claude-opus-5` og koster under det halve. Vil du sammenligne, så sæt
+   `CLAUDE_MODEL=claude-opus-5` i Vercel og kør en søgning med hver.
 3. **De to kald sendes samtidig.** Før hentede vi forslag 1, ventede på svaret,
    og brugte bilens navn til at bede om noget andet i forslag 2. Det var pænt,
    men det gjorde hver søgning dobbelt så lang. Se nedenfor.
