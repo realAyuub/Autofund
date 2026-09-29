@@ -10,12 +10,25 @@
 //
 // Miljøvariabler:
 //   ANTHROPIC_API_KEY   påkrævet
-//   CLAUDE_MODEL        valgfri, standard claude-opus-5
-//   CLAUDE_EFFORT       valgfri, standard high (low | medium | high | xhigh | max)
+//   CLAUDE_MODEL        valgfri, standard claude-sonnet-5
+//   CLAUDE_EFFORT       valgfri, standard medium (low | medium | high | xhigh | max)
+//
+// HASTIGHED. To knapper, og begge kan skrues på uden at røre koden:
+//
+//   MODEL — Sonnet svarer hurtigere end Opus og koster under det halve. Opgaven
+//   her er afgrænset: find én bil der passer til et skema, og udfyld felterne.
+//   Det er ikke et åbent researchproblem, og forskellen på de to modeller viser
+//   sig først for alvor på den slags. Vil du sammenligne selv, så sæt
+//   CLAUDE_MODEL=claude-opus-5 i Vercel og kør en søgning med hver.
+//
+//   EFFORT — styrer hvor længe modellen tænker, før den svarer, og tænkningen
+//   er langt det meste af de sekunder brugeren kigger på en spinner. API'ets
+//   egen standard er "high"; her står den på "medium". CLAUDE_EFFORT=low er
+//   hurtigst, =high er grundigst.
 const Anthropic = require("@anthropic-ai/sdk");
 
-const MODEL  = process.env.CLAUDE_MODEL  || "claude-opus-5";
-const EFFORT = process.env.CLAUDE_EFFORT || "high";
+const MODEL  = process.env.CLAUDE_MODEL  || "claude-sonnet-5";
+const EFFORT = process.env.CLAUDE_EFFORT || "medium";
 
 const SYSTEM = `Du er Danmarks bedste uafhængige bilrådgiver. Du kender det danske brugtbilmarked, danske priser, afgifter og hvad der reelt står til salg på Bilbasen.
 
@@ -38,6 +51,20 @@ PRÆCISION — det vigtigste af det hele:
 KAROSSERI: Brug den kategori bilen sælges under i Danmark. "Mikro" er de
 mindste bybiler. "Crossover (CUV)" er en hævet hatchback — mindre og lavere end
 en SUV. "Minibus (MPV)" er en høj etrumsbil med plads til mange.
+
+UDSTYRSVARIANT — trim_advice: Man vælger ikke udstyr fra et katalog når man køber
+brugt; man leder efter de rigtige eksemplarer blandt dem der er til salg. Skriv
+derfor en indkøbsseddel, ikke en katalogbeskrivelse.
+- "recommended" er den udstyrslinje der giver bedst værdi for NETOP denne familie,
+  med modellens rigtige danske navn på linjen (f.eks. "Ambition", "Style",
+  "R-Line"). Kender du ikke linjenavnene, så beskriv niveauet i stedet.
+- "must_have" er 2-4 ting de skal insistere på, og hver begrundelse SKAL knytte
+  an til noget de faktisk har svaret: mange motorvejskilometer, børn i bilen,
+  anhænger, automatgear, kort ladetid.
+- "skip" er 2-3 ting man typisk betaler for meget for på brugtmarkedet, eller som
+  koster mere i drift end de giver. Store fælge, panoramatag og luftaffjedring er
+  klassiske eksempler — men vælg dem der passer til modellen.
+- Nævn udstyr der holder på værdien ved videresalg, hvis det er relevant.
 
 SPROG: Alt indhold skrives på dansk, i et roligt og konkret sprog uden fagudtryk. Skriv til en person der ikke interesserer sig for biler.
 
@@ -68,7 +95,7 @@ const CAR_SCHEMA = {
     "price_new_dkk","price_used_dkk","fuel_type","fuel_cost_monthly","resale",
     "pros","cons","safety_rating","reliability","colors_dk",
     "bilbasen_brand_slug","bilbasen_model_slug","bilbasen_search_term",
-    "imagin_make","imagin_model_family","wikipedia_title",
+    "imagin_make","imagin_model_family","wikipedia_title","trim_advice",
   ],
   properties: {
     brand: { type: "string" },
@@ -115,6 +142,24 @@ const CAR_SCHEMA = {
     imagin_make: { type: "string" },
     imagin_model_family: { type: "string" },
     wikipedia_title: { type: "string" },
+    trim_advice: {
+      type: "object", additionalProperties: false,
+      required: ["recommended","why","must_have","skip"],
+      properties: {
+        recommended: { type: "string", description: "Den udstyrslinje man skal lede efter, f.eks. \"Ambition\" eller \"Style\"" },
+        why: { type: "string", description: "1-2 sætninger om hvorfor netop den passer til DENNE families svar" },
+        must_have: {
+          type: "array", description: "2-4 ting man skal insistere på i annoncen",
+          items: { type: "object", additionalProperties: false, required: ["item","why"],
+            properties: { item: { type: "string" }, why: { type: "string", description: "Kort begrundelse knyttet til familiens svar" } } },
+        },
+        skip: {
+          type: "array", description: "2-3 ting man IKKE skal betale ekstra for",
+          items: { type: "object", additionalProperties: false, required: ["item","why"],
+            properties: { item: { type: "string" }, why: { type: "string" } } },
+        },
+      },
+    },
   },
 };
 
@@ -150,15 +195,19 @@ module.exports = async function handler(req, res) {
     }
 
     const client = new Anthropic();
-    const message = await client.messages.create({
+    // Svaret streames. Ikke for at vise det løbende — vi skal bruge hele
+    // JSON'en, før der kan tegnes et bilkort — men fordi et almindeligt kald
+    // med et højt max_tokens kan løbe ind i en HTTP-timeout undervejs og dø
+    // uden svar. Når der kommer data på linjen hele tiden, sker det ikke.
+    const stream = client.messages.stream({
       model: MODEL,
       // Tænkning er slået til som standard på Opus 5, og de tokens tæller med i
       // det SAMME budget som svaret. Et lavt loft betyder derfor ikke "et kort
       // svar" — det betyder at JSON'en bliver klippet over midt i, og så er
       // hele svaret ubrugeligt. Skemaet her er stort, så der skal være luft.
       max_tokens: 16000,
-      // Systemprompten er ens for alle fire kald i en søgning — cachet er den
-      // næsten gratis fra kald nummer to.
+      // Systemprompten er ens for begge kald i en søgning — cachet er den
+      // næsten gratis i kald nummer to.
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
       output_config: {
         effort: EFFORT,
@@ -166,6 +215,7 @@ module.exports = async function handler(req, res) {
       },
       messages: [{ role: "user", content: profile }],
     });
+    const message = await stream.finalMessage();
 
     if (message.stop_reason === "refusal") {
       console.error("REFUSAL", message.stop_details);

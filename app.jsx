@@ -146,12 +146,16 @@ function buildProfile(f, rank, exclude, avoidCar) {
 
   // Hvert forslag får sin egen vinkel, så de fire bud ikke ender som variationer
   // over samme bil. Vinklerne er formuleret som krav, ikke som ønsker.
-  const ANGLES = {
-    2: 'Dette er FORSLAG 2. Vælg et ANDET MÆRKE end forslag 1, og enten en anden karosseriform eller et andet drivmiddel.',
-  };
+  /* Forslag 2 hentes samtidig med forslag 1 og kender det derfor ikke. I stedet
+     for at bede om "noget andet end X" beder vi om den næstbedste vej: det bud
+     man ville give, hvis det oplagte valg var udelukket. Det giver to forskellige
+     biler uden at nogen skal vente på den anden. Rammer de alligevel det samme,
+     stilles spørgsmålet igen — og så står navnet i "avoidCar". */
   const rankTxt = rank===1
     ? `Dette er FORSLAG 1 — det bedste samlede match.`
-    : `${ANGLES[rank]||`Dette er FORSLAG ${rank}, og det skal være markant anderledes end de foregående.`} Forklar i "differs_from_primary" med én sætning hvad der konkret adskiller den fra ${avoidCar||"de øvrige forslag"}.`;
+    : avoidCar
+      ? `Dette er FORSLAG 2. Det må IKKE være ${avoidCar}. Vælg et andet mærke, og enten en anden karosseriform eller et andet drivmiddel. Forklar i "differs_from_primary" med én sætning hvad der konkret adskiller den fra ${avoidCar}.`
+      : `Dette er FORSLAG 2, og det hentes samtidig med forslag 1 — du kender derfor ikke forslag 1. Giv det bud du ville give, hvis det mest oplagte valg var udelukket: et andet mærke end det nærliggende, og gerne en anden karosseriform eller et andet drivmiddel. Det skal stadig passe til familiens svar og holde sig inden for budgettet. Skriv i "differs_from_primary" med én sætning hvad der gør netop denne bil til et anderledes valg.`;
 
   return [
     lines.join("\n"),
@@ -910,6 +914,37 @@ function CarCard({car,form,onReject,rank=0,loading}) {
         <ColorPalette colors={car.colors_dk} selected={color} onSelect={setColor}/>
       </Panel>}
 
+      {/* Indkøbsseddel til annoncen. På brugtmarkedet vælger man ikke udstyr
+          fra et katalog — man leder efter de rigtige eksemplarer. */}
+      {car.trim_advice && car.trim_advice.recommended && <Panel title="Hvilken udstyrsvariant?">
+        <div style={{marginBottom:12}}>
+          <span style={{color:C.accent,fontSize:19,fontWeight:600,fontFamily:DISPLAY}}>{car.trim_advice.recommended}</span>
+          {car.trim_advice.why && <p style={{color:C.text,fontSize:16,lineHeight:1.65,marginTop:6}}>{car.trim_advice.why}</p>}
+        </div>
+        {Array.isArray(car.trim_advice.must_have) && car.trim_advice.must_have.length>0 && <div style={{marginBottom:14}}>
+          <div style={{color:C.good,fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Insistér på</div>
+          {car.trim_advice.must_have.filter(x=>x&&x.item).map((x,i)=>
+            <div key={i} style={{display:"flex",gap:9,marginBottom:8,alignItems:"flex-start"}}>
+              <span style={{color:C.good,fontSize:13,marginTop:3}}>✓</span>
+              <span style={{fontSize:15.5,lineHeight:1.55}}>
+                <b style={{color:C.text,fontWeight:600}}>{x.item}</b>
+                {x.why && <span style={{color:C.muted}}> — {x.why}</span>}
+              </span>
+            </div>)}
+        </div>}
+        {Array.isArray(car.trim_advice.skip) && car.trim_advice.skip.length>0 && <div>
+          <div style={{color:C.muted,fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Betal ikke ekstra for</div>
+          {car.trim_advice.skip.filter(x=>x&&x.item).map((x,i)=>
+            <div key={i} style={{display:"flex",gap:9,marginBottom:8,alignItems:"flex-start"}}>
+              <span style={{color:C.dim,fontSize:13,marginTop:3}}>–</span>
+              <span style={{fontSize:15.5,lineHeight:1.55}}>
+                <b style={{color:C.text,fontWeight:600}}>{x.item}</b>
+                {x.why && <span style={{color:C.muted}}> — {x.why}</span>}
+              </span>
+            </div>)}
+        </div>}
+      </Panel>}
+
       {car.fdm_verdict && <Panel title="FDM’s vurdering" tone="accent">
         <p style={{color:C.text,fontSize:16,lineHeight:1.7,marginBottom:11}}>{car.fdm_verdict}</p>
         <a href={FDM_SEARCH(`${car.brand} ${car.model} test`)} target="_blank" rel="noopener noreferrer"
@@ -1460,11 +1495,9 @@ function App() {
     return true;
   };
 
-  /* Forslag 1 hentes først og vises med det samme; de tre øvrige hentes
-     derefter parallelt, hver med sin vinkel. Et kort der fejler eller kommer
-     tilbage som en dublet FORSVINDER IKKE — pladsen bliver stående med en
-     forklaring og en prøv-igen-knap, så man ikke sidder med to kort og undrer
-     sig over hvor de andre to blev af. */
+  /* Et kort der fejler eller kommer tilbage som en dublet FORSVINDER IKKE —
+     pladsen bliver stående med en forklaring og en prøv-igen-knap, så man ikke
+     sidder med ét kort og undrer sig over hvor det andet blev af. */
   async function fetchSlot(rank, avoid, avoidCar) {
     let car = await fetchOneCar(buildProfile(form, rank, avoid, avoidCar));
     return car;
@@ -1479,9 +1512,23 @@ function App() {
     setError("");
     top();
 
+    /* BEGGE kald sendes af sted SAMTIDIG. Før hentede vi forslag 1, ventede på
+       svaret, og brugte så bilens navn til at bede om noget andet i forslag 2 —
+       pænt, men det betød at hver søgning tog præcis dobbelt så lang tid som ét
+       kald. Nu kender forslag 2 ikke forslag 1 og får i stedet besked på at gå
+       en bevidst anden vej. Lander de alligevel på samme bil, hentes forslag 2
+       igen med navnet på forslag 1. Det koster ét ekstra kald i de få tilfælde
+       det sker, frem for at lægge ventetid på hver eneste søgning. */
+    const avoid2 = [...excl[1], ...excl[0]].filter(Boolean);
+    const p1 = fetchSlot(1, excl[0], "");
+    const p2 = fetchSlot(2, avoid2, "");
+    // Uden det her bliver et afvist kald 2 til en "unhandled rejection" i de
+    // sekunder der går, før vi når ned og venter på det.
+    p1.catch(()=>{}); p2.catch(()=>{});
+
     let first = null;
     try {
-      first = await fetchSlot(1, excl[0], "");
+      first = await p1;
       setCards(c=>[first,c[1]]);
       setSummary(`Ud fra jeres svar er ${first.brand} ${first.model} det bedste match — herunder ser I et bevidst anderledes alternativ.`);
     } catch(e) {
@@ -1492,26 +1539,19 @@ function App() {
 
     const firstName = first ? `${first.brand} ${first.model}` : "";
     const taken = new Set([carKey(first)].filter(Boolean));
-
-    await Promise.all([2].map(async rank => {
-      const idx = rank-1;
-      const avoid = [...excl[idx], ...excl[0], firstName].filter(Boolean);
-      try {
-        let car = await fetchSlot(rank, avoid, firstName);
-        // Samme bil som et kort vi allerede viser? Bed om en anden, én gang.
-        if (taken.has(carKey(car))) {
-          car = await fetchSlot(rank, [...avoid, `${car.brand} ${car.model}`], firstName);
-        }
-        if (taken.has(carKey(car))) throw new Error("Kun dubletter");
-        taken.add(carKey(car));
-        setCards(c=>c.map((v,i)=>i===idx?car:v));
-      } catch(e) {
-        setFailed(f=>f.map((v,i)=>i===idx?true:v));
-        setFailMsg(m=>m.map((v,i)=>i===idx?(e.hint||e.message||""):v));
-      } finally {
-        setLoading(l=>l.map((v,i)=>i===idx?false:v));
+    try {
+      let car = await p2;
+      // Samme bil som kortet ovenfor? Bed om en anden, én gang — nu med navnet.
+      if (taken.has(carKey(car))) {
+        car = await fetchSlot(2, [...avoid2, firstName].filter(Boolean), firstName);
       }
-    }));
+      if (taken.has(carKey(car))) throw new Error("Kun dubletter");
+      setCards(c=>[c[0],car]);
+    } catch(e) {
+      setFailed(f=>[f[0],true]);
+      setFailMsg(m=>[m[0],e.hint||e.message||""]);
+    }
+    setLoading(l=>[l[0],false]);
   }
 
   /* Prøv ét enkelt felt igen — bruges af knappen på et kort der fejlede */

@@ -18,12 +18,16 @@ FDM-vurdering og færdige søgninger på Bilbasen.
 ## Sådan bygger du efter en ændring
 
 Retter du i `app.jsx`, skal `app.js` bygges igen, ellers sker der ingenting på
-siden. Kør denne ene kommando i mappen — der skal ikke installeres noget først:
+siden. Første gang henter du værktøjet, derefter er der kun én kommando:
 
 ```
-npx esbuild app.jsx --bundle --minify --format=iife --target=es2018 \
-  --jsx=automatic --define:process.env.NODE_ENV='"production"' --outfile=app.js
+npm install      # kun første gang
+npm run bundle   # efter hver ændring i app.jsx
 ```
+
+`react` og `esbuild` står som `devDependencies`, fordi de kun bruges når filen
+bygges. Vercel kører ikke selv byggeriet — der er med vilje ikke noget
+`build`-script — så **den byggede `app.js` skal committes med.**
 
 React er bygget ind i `app.js`, så siden henter én fil i stedet for at hente
 React og en JSX-oversætter og oversætte koden i browseren hver gang nogen
@@ -48,8 +52,8 @@ Sættes i Vercel under Settings → Environment Variables.
 | Variabel | Krævet | Betydning |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Ja | API-nøgle til Claude. |
-| `CLAUDE_MODEL` | Nej | Standard er `claude-opus-5`. `claude-sonnet-5` er billigere. |
-| `CLAUDE_EFFORT` | Nej | Standard `high`. `medium` eller `low` er hurtigere og billigere. |
+| `CLAUDE_MODEL` | Nej | Standard er `claude-sonnet-5`. `claude-opus-5` er grundigere, men langsommere og dyrere. |
+| `CLAUDE_EFFORT` | Nej | Standard `medium`. `low` er hurtigst, `high` er grundigst. |
 | `RESEND_API_KEY` | Nej | Sender forespørgsler som e-mail. |
 | `LEAD_TO_EMAIL` | Nej | Modtageradressen. |
 | `LEAD_FROM_EMAIL` | Nej | Afsender på et domæne verificeret hos Resend. |
@@ -126,10 +130,39 @@ Appen byggede tidligere den sidste form. Derfor:
 
 Prisspændet er som standard ±15 %, fordi det ligger om et *estimat*.
 
+## Udstyrsvariant
+
+Bilkortet fortæller hvilken udstyrslinje man skal lede efter, og hvorfor —
+knyttet til brugerens egne svar. Man vælger ikke udstyr fra et katalog når man
+køber brugt, så feltet er skrevet som en indkøbsseddel: hvad man skal insistere
+på i annoncen, og hvad man ikke skal betale ekstra for. Ligger i `trim_advice`.
+
+## Ventetid
+
+Tre ting bestemmer hvor længe brugeren kigger på en spinner:
+
+1. **`CLAUDE_EFFORT`** er den største knap. Den styrer hvor længe modellen
+   tænker før den svarer, og tænkningen er det meste af ventetiden. Står på
+   `medium`. `low` er mærkbart hurtigere; `high` er grundigere.
+2. **Modellen.** Standarden er `claude-sonnet-5`, som svarer hurtigere end
+   `claude-opus-5` og koster under det halve. Vil du sammenligne, så sæt
+   `CLAUDE_MODEL=claude-opus-5` i Vercel og kør en søgning med hver.
+3. **De to kald sendes samtidig.** Før hentede vi forslag 1, ventede på svaret,
+   og brugte bilens navn til at bede om noget andet i forslag 2. Det var pænt,
+   men det gjorde hver søgning dobbelt så lang. Se nedenfor.
+
+Svaret streames fra API'et. Ikke for at vise det løbende — hele JSON'en skal
+være der, før der kan tegnes et bilkort — men fordi et langt kald ellers kan
+ramme en HTTP-timeout undervejs og dø uden svar. `vercel.json` giver desuden
+funktionerne 60 sekunder i stedet for standardens 10.
+
 ## To forslag ad gangen
 
-Forslag 1 hentes først og vises med det samme. Alternativet hentes derefter og
-skal være et andet mærke og enten anden karosseriform eller andet drivmiddel.
+Begge kald sendes af sted **samtidig**. Forslag 2 kender derfor ikke forslag 1
+og får i stedet besked på at give det bud man ville give, hvis det oplagte valg
+var udelukket. Lander de alligevel på samme bil, hentes forslag 2 igen — denne
+gang med navnet på forslag 1. Det koster ét ekstra kald i de få tilfælde det
+sker, frem for at lægge ventetid på hver eneste søgning.
 
 Et kald der bliver afvist prøves automatisk igen to gange med stigende
 ventetid. Lykkes det stadig ikke — eller kommer den samme bil igen som et af
